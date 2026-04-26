@@ -49,7 +49,8 @@ import { IconButton } from './components/ui/IconButton';
 import { SpreadsheetModal } from './components/modals/SpreadsheetModal';
 import { AdminModal } from './components/modals/AdminModal';
 import { LiveFeed } from './components/features/LiveFeed';
-import { FootballStudioStats } from './components/features/FootballStudioStats';
+import { Speed } from './components/features/speed';
+import { RestrictedAccessPanel } from './components/features/RestrictedAccessPanel';
 
 // Hooks
 import { useFirebaseSync } from './hooks/useFirebaseSync';
@@ -140,6 +141,8 @@ export default function App() {
   const [stopLoss, setStopLoss] = useState('20');
   const [lastSignalMinute, setLastSignalMinute] = useState<number | null>(null);
   const [isProfessionalMode, setIsProfessionalMode] = useState(false);
+  const [isAccessUnlocked, setIsAccessUnlocked] = useState(false);
+  const [isAccessPanelOpen, setIsAccessPanelOpen] = useState(false);
   const [liveAssertiveness, setLiveAssertiveness] = useState(94.2);
 
   // Admin States
@@ -396,23 +399,7 @@ export default function App() {
 
       {/* Brand Background Image - Global */}
       <div className="fixed inset-0 z-[-2] pointer-events-none overflow-hidden flex items-center justify-center opacity-[0.45]">
-        <motion.img 
-          initial={{ scale: 1.1, opacity: 0 }}
-          animate={{ 
-            scale: [1, 1.02, 1],
-            opacity: [1, 0.8, 1, 0.9, 1],
-            filter: ["hue-rotate(0deg)", "hue-rotate(10deg)", "hue-rotate(0deg)"]
-          }}
-          transition={{ 
-            duration: 8, 
-            repeat: Infinity,
-            times: [0, 0.95, 0.96, 0.98, 1], // Glitch effect at the end of the loop
-            ease: "linear"
-          }}
-          src="/login_bg.jpg"
-          className="w-full h-full object-cover"
-          referrerPolicy="no-referrer"
-        />
+        <div className="absolute inset-0 bg-black" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black" />
         <div className="absolute inset-0 bg-gradient-to-r from-black via-transparent to-black" />
       </div>
@@ -462,6 +449,16 @@ export default function App() {
         isOpen={showSpreadsheet} onClose={() => setShowSpreadsheet(false)}
         banca={banca} setBanca={setBanca} meta={meta} setMeta={setMeta} stopLoss={stopLoss} setStopLoss={setStopLoss}
         strategy={strategy} setStrategy={setStrategy}
+      />
+
+      <RestrictedAccessPanel 
+        isOpen={isAccessPanelOpen}
+        onClose={() => setIsAccessPanelOpen(false)}
+        onUnlock={() => {
+          setIsAccessUnlocked(true);
+          setIsAccessPanelOpen(false);
+          if (playSound) playSound('SUCCESS');
+        }}
       />
 
       <AdminModal 
@@ -594,7 +591,7 @@ export default function App() {
            </header>
 
            <div className="w-full relative z-10 flex flex-col gap-4">
-              <FootballStudioStats results={recentResults} gameState={gameState} />
+              <Speed results={recentResults} gameState={gameState} />
               
               <div className="flex flex-col items-center justify-center w-full relative group/terminal">
                  {/* Atmospheric Glow */}
@@ -609,13 +606,21 @@ export default function App() {
                       targetColor={targetColor} targetCard={targetCard} 
                       confidence={confidence} assertiveness={assertiveness}
                       strategy={strategy} lastSignalMinute={lastSignalMinute}
-                      onStart={runTimeline}
+                      onStart={() => {
+                        if (!isAccessUnlocked) {
+                          setIsAccessPanelOpen(true);
+                          return;
+                        }
+                        runTimeline();
+                      }}
                       selectedGame={selectedGame}
                       currentTheme={currentTheme}
                       isProfessionalMode={isProfessionalMode}
                       createRipple={createRipple}
                       runTimeline={runTimeline}
                       playSound={playSound}
+                      isAccessUnlocked={isAccessUnlocked}
+                      onUnlockClick={() => setIsAccessPanelOpen(true)}
                     />
                     
                     <div className="w-full flex gap-6 mt-2 max-w-2xl px-4">
@@ -641,9 +646,6 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full max-w-7xl mx-auto">
-                 <div className="lg:col-span-12">
-                    <SignalLogs selectedGame={selectedGame} currentTheme={currentTheme} isProfessionalMode={isProfessionalMode} />
-                 </div>
                  <div className="lg:col-span-12">
                     <StrategyBoard selectedGame={selectedGame} currentTheme={currentTheme} isProfessionalMode={isProfessionalMode} />
                  </div>
@@ -689,7 +691,13 @@ function WinsTicker({ wins }: { wins: WinRecord[] }) {
   );
 }
 
-function MainDisplay({ gameState, progress, targetColor, targetCard, confidence, assertiveness, strategy, lastSignalMinute, onStart, selectedGame, currentTheme, isProfessionalMode, createRipple, runTimeline, playSound }: any) {
+function MainDisplay({ 
+  gameState, progress, targetColor, targetCard, confidence, 
+  assertiveness, strategy, lastSignalMinute, onStart, 
+  selectedGame, currentTheme, isProfessionalMode, 
+  createRipple, runTimeline, playSound,
+  isAccessUnlocked, onUnlockClick
+}: any) {
   return (
     <>
       <AnimatePresence>
@@ -738,6 +746,31 @@ function MainDisplay({ gameState, progress, targetColor, targetCard, confidence,
       targetColor === 'RED' ? "shadow-[0_0_50px_rgba(255,0,0,0.2)]" : 
       "shadow-[0_0_50px_rgba(255,215,0,0.2)]"
     )}>
+      {/* Locked Overlay */}
+      {!isAccessUnlocked && (
+        <div className="absolute inset-0 z-50 backdrop-blur-xl bg-black/80 flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-20 h-20 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(59,130,246,0.1)]">
+            <Cpu className="text-blue-500 animate-pulse" size={40} />
+          </div>
+          <h3 className="text-2xl font-black text-white uppercase tracking-[0.2em] italic mb-4">
+            ACESSO <span className="text-blue-500">RESTRITO</span>
+          </h3>
+          <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.3em] mb-10 max-w-xs leading-relaxed">
+            A ferramenta de geração de sinais requer sincronização de chave global criptografada v4.0.1.
+          </p>
+          <button 
+            onClick={onUnlockClick}
+            className="group relative px-10 py-5 rounded-2xl bg-blue-600 overflow-hidden transition-all hover:scale-105 active:scale-95"
+          >
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <span className="relative z-10 text-white text-[11px] font-black uppercase tracking-[0.3em] flex items-center gap-3">
+              <Zap size={14} className="fill-current" />
+              Sincronizar Chave Global
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Decorative Game Pattern Background */}
       <div className="absolute inset-0 opacity-[0.05] pointer-events-none">
         <div className="absolute inset-0 grid grid-cols-4 md:grid-cols-6 gap-12 p-8">
@@ -870,7 +903,11 @@ function MainDisplay({ gameState, progress, targetColor, targetCard, confidence,
                     <motion.div animate={{ rotate: 15, x: 20 }} className="absolute right-0 top-1/2 -translate-y-1/2 w-32 h-44 border-2 border-white/20 rounded-2xl bg-white/5 backdrop-blur-sm" />
                  </div>
 
-                  <Tooltip content={targetColor === 'TIE' ? "Probabilidade de empate detectada" : `Entrada confirmada para ${targetColor === 'BLUE' ? 'PLAYER' : 'BANKER'}`}>
+                  <Tooltip content={targetColor === 'TIE' ? "Probabilidade de empate detectada" : `Entrada confirmada para ${
+                    selectedGame === 'FOOTBALL_STUDIO' 
+                      ? (targetColor === 'BLUE' ? 'VISITANTE' : 'CASA')
+                      : (targetColor === 'BLUE' ? 'PLAYER' : 'BANKER')
+                  }`}>
                     <motion.div 
                       animate={{ 
                         y: [0, -10, 0],
@@ -901,20 +938,23 @@ function MainDisplay({ gameState, progress, targetColor, targetCard, confidence,
                          {selectedGame === 'BACCARAT' ? 'BACCARAT' : selectedGame === 'BACBO' ? 'BACBO' : 'FOOTBALL'}
                        </div>
   
-                      <motion.h3 
-                         animate={{ 
-                           scale: [0.98, 1.02, 0.98],
-                           x: selectedGame === 'BACCARAT' && gameState === 'SIGNAL_FOUND' ? [0, 5, -5, 0] : 0
-                         }}
-                         transition={{ duration: 1.5, repeat: Infinity }}
-                         className={cn(
-                           "text-6xl md:text-7xl font-black text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.9)] italic uppercase tracking-tighter relative z-10 text-center px-4",
-                           isProfessionalMode ? "font-mono" : "font-display"
-                         )}
-                       >
-                         {targetColor === 'BLUE' ? (selectedGame === 'BACCARAT' ? 'PLAYER' : selectedGame === 'FOOTBALL_STUDIO' ? 'HOME' : 'PLAYER') : 
-                          targetColor === 'RED' ? (selectedGame === 'BACCARAT' ? 'BANKER' : selectedGame === 'FOOTBALL_STUDIO' ? 'AWAY' : 'BANKER') : 'EMPATE'}
-                       </motion.h3>
+                        <motion.h3 
+                          animate={{ 
+                            scale: [0.98, 1.02, 0.98],
+                            x: selectedGame === 'BACCARAT' && gameState === 'SIGNAL_FOUND' ? [0, 5, -5, 0] : 0
+                          }}
+                          transition={{ duration: 1.5, repeat: Infinity }}
+                          className={cn(
+                            "text-6xl md:text-7xl font-black text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.9)] italic uppercase tracking-tighter relative z-10 text-center px-4",
+                            isProfessionalMode ? "font-mono" : "font-display"
+                          )}
+                        >
+                          {targetColor === 'TIE' ? 'EMPATE' : (
+                            selectedGame === 'FOOTBALL_STUDIO'
+                              ? (targetColor === 'BLUE' ? 'AWAY' : 'HOME')
+                              : (targetColor === 'BLUE' ? 'PLAYER' : 'BANKER')
+                          )}
+                        </motion.h3>
                        
                        <div className="flex gap-10 mt-10 text-white/40 relative z-10">
                          <motion.div 
@@ -1081,123 +1121,6 @@ function StrategyButton({ active, onClick, label, icon, theme, shake, isProfessi
   );
 }
 
-function SignalLogs({ selectedGame, currentTheme, isProfessionalMode }: any) {
-  const historicalAlerts = [
-    { time: '13:54', type: 'TIE', label: 'EMPATE', val1: 4, val2: 4, confirmed: true },
-    { time: '13:52', type: 'RED', label: 'CASA', val1: 2, val2: 1, confirmed: true },
-    { time: '13:48', type: 'BLUE', label: 'FORA', val1: 3, val2: 5, confirmed: true },
-    { time: '13:45', type: 'TIE', label: 'EMPATE', val1: 6, val2: 6, confirmed: true },
-    { time: '13:43', type: 'RED', label: 'CASA', val1: 1, val2: 0, confirmed: true },
-    { time: '13:40', type: 'BLUE', label: 'FORA', val1: 2, val2: 2, confirmed: true },
-    { time: '13:36', type: 'TIE', label: 'EMPATE', val1: 3, val2: 3, confirmed: true },
-    { time: '13:21', type: 'TIE', label: 'EMPATE', val1: 4, val2: 4, confirmed: true },
-  ];
-
-  const renderHistoryItem = (alert: any, i: number) => {
-    if (selectedGame === 'BACCARAT') {
-      return (
-        <div className={cn(
-          "w-full aspect-square rounded-full flex items-center justify-center text-[10px] font-black border-2 transition-all hover:scale-110",
-          alert.type === 'RED' ? "bg-baccarat-banker border-white/20 text-white" :
-          alert.type === 'BLUE' ? "bg-baccarat-player border-white/20 text-white" :
-          "bg-green-500 border-white/20 text-white",
-          isProfessionalMode && (alert.type === 'TIE' ? "bg-prof-emerald shadow-[inset_0_0_10px_rgba(0,0,0,0.3)]" : "shadow-[inset_0_0_10px_rgba(0,0,0,0.3)]")
-        )}>
-          {alert.type === 'RED' ? 'B' : alert.type === 'BLUE' ? 'P' : 'T'}
-        </div>
-      );
-    }
-
-    if (selectedGame === 'BACBO') {
-      return (
-        <div className={cn(
-          "w-full aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 border transition-all hover:scale-105",
-          isProfessionalMode 
-            ? "bg-prof-black border-prof-emerald/20 shadow-[inset_0_0_15px_rgba(80,200,120,0.05)]"
-            : (alert.type === 'RED' ? "bg-red-500/20 border-red-500/30" :
-               alert.type === 'BLUE' ? "bg-blue-500/20 border-blue-500/30" :
-               "bg-orange-500/20 border-orange-500/30 shadow-[inset_0_0_15px_rgba(249,115,22,0.1)]")
-        )}>
-          <Dices size={10} className={cn(alert.type === 'TIE' ? (isProfessionalMode ? "text-prof-gold" : "text-orange-500") : "text-white/40")} />
-          <span className={cn("text-[9px] font-bold text-white", isProfessionalMode && "font-mono")}>{alert.val1 + alert.val2}</span>
-        </div>
-      );
-    }
-
-    return (
-      <div className={cn(
-        "w-full py-2 rounded-lg flex flex-col items-center justify-center gap-1 border transition-all hover:scale-105",
-        isProfessionalMode 
-          ? "bg-prof-black border-white/10 shadow-[inset_0_0_15px_rgba(255,255,255,0.02)]"
-          : (alert.type === 'RED' ? "bg-red-950/20 border-red-500/20" :
-             alert.type === 'BLUE' ? "bg-blue-950/20 border-blue-500/20" :
-             "bg-yellow-950/20 border-yellow-500/20")
-      )}>
-        <span className="text-[7px] font-bold text-white/40">{alert.time}</span>
-        <div className="flex items-center gap-1">
-          <span className={cn("text-[10px] font-black text-white", isProfessionalMode && "font-mono")}>{alert.val1}x{alert.val2}</span>
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className={cn(
-      "w-full glass-panel rounded-[20px] p-8 relative overflow-hidden group transition-all",
-      isProfessionalMode 
-        ? "bg-prof-graphite border-white/5 shadow-[inset_0_0_30px_rgba(0,0,0,0.5)]"
-        : (selectedGame === 'BACCARAT' ? "bg-black/60 shadow-[0_0_40px_rgba(0,136,255,0.1)] border-white/5" : 
-           selectedGame === 'BACBO' ? "bg-black/60 shadow-[0_0_40px_rgba(255,0,0,0.1)] border-white/5" : 
-           "bg-black/60 shadow-[0_0_40px_rgba(255,215,0,0.1)] border-white/5")
-    )}>
-      <div className="absolute top-0 right-0 p-8 opacity-10">
-        {selectedGame === 'BACCARAT' ? <Spade size={80} /> : selectedGame === 'BACBO' ? <Dices size={80} /> : <Trophy size={80} />}
-      </div>
-      
-      <div className="flex flex-col gap-8 relative z-10">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-[14px] font-black text-white uppercase tracking-[0.3em] italic">
-              {selectedGame === 'BACCARAT' ? 'BEAD PLATE HISTORY' : selectedGame === 'BACBO' ? 'DICE ANALYZER' : 'MATCH TIMELINE'}
-            </h3>
-            <div className="text-[10px] text-white/40 mt-1 font-bold uppercase tracking-widest">Base de Dados Histórica • Sinais Confirmados</div>
-          </div>
-          <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2">
-                <div className={cn("w-2 h-2 rounded-full animate-pulse", currentTheme?.accent.replace('text-', 'bg-') || "bg-bet-tie")} />
-                <span className="text-[10px] font-bold text-white/60">SISTEMA v4.0 ACTIVE</span>
-             </div>
-          </div>
-        </div>
-
-        <div className={cn(
-          "grid gap-3",
-          selectedGame === 'BACCARAT' ? "grid-cols-6 md:grid-cols-10 lg:grid-cols-12" : 
-          selectedGame === 'BACBO' ? "grid-cols-4 md:grid-cols-6 lg:grid-cols-8" : 
-          "grid-cols-1"
-        )}>
-          {historicalAlerts.map((alert, i) => (
-            <motion.div 
-              key={`history-alert-${alert.time}-${i}`}
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.05 }}
-            >
-              {renderHistoryItem(alert, i)}
-            </motion.div>
-          ))}
-          
-          {/* Active Placeholder */}
-          <div className="flex flex-col items-center gap-2 opacity-30 animate-pulse">
-             <div className="w-full aspect-square rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center">
-                <Target size={12} className="text-white/40" />
-             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function StrategyBoard({ selectedGame, isProfessionalMode }: any) {
   const [probableTimes, setProbableTimes] = React.useState<any[]>([]);
@@ -1206,7 +1129,9 @@ function StrategyBoard({ selectedGame, isProfessionalMode }: any) {
     const generateTimes = () => {
       const times = [];
       const now = new Date();
-      const labels = ['EMPATE', 'RED', 'EMPATE', 'BLUE', 'EMPATE'];
+      const labels = selectedGame === 'FOOTBALL_STUDIO' 
+        ? ['EMPATE', 'HOME', 'EMPATE', 'AWAY', 'EMPATE'] 
+        : ['EMPATE', 'RED', 'EMPATE', 'BLUE', 'EMPATE'];
       const colors = ['GOLD', 'RED', 'GOLD', 'BLUE', 'GOLD'];
       
       for (let i = 0; i < 5; i++) {
