@@ -6,7 +6,7 @@ import session from 'express-session';
 import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 
-// Implementação do Banco de Dados JSON
+// Simple JSON Database Implementation
 const DB_PATH = path.join(process.cwd(), 'database.json');
 
 async function getDB() {
@@ -14,7 +14,7 @@ async function getDB() {
     const data = await fs.readFile(DB_PATH, 'utf-8');
     return JSON.parse(data);
   } catch {
-    const initialDB = { keys: [], client_data: [], blacklist: [] };
+    const initialDB = { keys: [], client_data: [] };
     await fs.writeFile(DB_PATH, JSON.stringify(initialDB, null, 2));
     return initialDB;
   }
@@ -32,13 +32,11 @@ declare module 'express-session' {
 
 async function startServer() {
   const app = express();
-  
-  // Porta dinâmica obrigatória para o Railway
-  const PORT = process.env.PORT || 3000;
+  const PORT = 3000;
 
-  console.log('Server: Iniciando configuração...');
+  console.log('Server: Initialization started...');
 
-  // Inicializa o banco com uma chave padrão se estiver vazio
+  // Initialize DB with a default 30-day key if empty
   const db_data = await getDB();
   if (!db_data.keys || db_data.keys.length === 0) {
     const expiresAt = new Date();
@@ -55,27 +53,68 @@ async function startServer() {
     await saveDB(db_data);
   }
 
+  console.log('Server: Database (JSON) ready.');
+
   app.use(express.json());
   app.use(cookieParser());
-  
-  // Configuração para o Railway (HTTPS Proxy)
-  app.set('trust proxy', 1); 
-  
   app.use(session({
     secret: 'speed-cards-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: { 
-      secure: process.env.NODE_ENV === 'production', 
-      maxAge: 30 * 24 * 60 * 60 * 1000 
-    }
+    cookie: { secure: false, maxAge: 30 * 24 * 60 * 60 * 1000 } // 30 days session
   }));
 
-  // Middlewares e Rotas de API
+  const authenticate = (req: any, res: any, next: any) => {
+    if (req.session.keyId) {
+      next();
+    } else {
+      res.status(401).json({ error: 'Unauthorized' });
+    }
+  };
+
+  // Admin API to sync a new global key
+  app.post('/api/admin/sync-global-key', async (req, res) => {
+    // In a real app, we'd verify admin session here.
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required' });
+
+    const db = await getDB();
+    
+    // Hard Reset Logic:
+    // 1. Invalidate Immediately: Move current keys to blacklist
+    if (!db.blacklist) db.blacklist = [];
+    db.keys.forEach((k: any) => {
+      // Avoid duplicates in blacklist
+      if (!db.blacklist.includes(k.password)) {
+        db.blacklist.push(k.password);
+      }
+    });
+
+    // 2. Clear current keys (Global Sync - This effectively logs out sessions on next check)
+    db.keys = [];
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    const newKey = {
+      id: Date.now().toString(),
+      password: bcrypt.hashSync(password, 10),
+      expiresAt: expiresAt.getTime(),
+      label: 'Acesso Sincronizado Global'
+    };
+
+    db.keys.push(newKey);
+    await saveDB(db);
+
+    res.json({ success: true, key: { ...newKey, password: 'HIDDEN' } });
+  });
+
   app.post('/api/login', async (req, res) => {
     const { password } = req.body;
     const db = await getDB();
 
+    // Check Blacklist first (Block Rollback)
+    // Since blacklist contains hashes, we need to compare incoming password against each
     if (db.blacklist && db.blacklist.some((hash: string) => bcrypt.compareSync(password, hash))) {
       return res.status(403).json({ error: 'Token Expirado - Gere um novo acesso' });
     }
@@ -94,22 +133,85 @@ async function startServer() {
     }
   });
 
+  app.post('/api/logout', (req, res) => {
+    req.session.destroy(() => {
+      res.json({ success: true });
+    });
+  });
+
   app.get('/api/me', async (req, res) => {
     if (!req.session.keyId) return res.status(401).json({ error: 'Not logged in' });
     const db = await getDB();
     const key = db.keys.find((k: any) => k.id === req.session.keyId);
     if (!key || Date.now() > key.expiresAt) {
       req.session.destroy(() => {});
-      return res.status(401).json({ error: 'Sessão expirada' });
+      return res.status(401).json({ error: 'Session expired' });
     }
     res.json(key);
   });
 
-  app.get('/cad', (req, res) => {
-    res.redirect('https://go.aff.casadeapostas.bet.br/jg6y1exs'); 
+  // Support registration of new keys for demo purposes
+  app.post('/api/register', async (req, res) => {
+    const { password } = req.body;
+    const db = await getDB();
+    
+    if (db.keys.find((k: any) => k.password === password)) {
+      return res.status(400).json({ error: 'Esta senha já existe.' });
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30);
+
+    const newKey = {
+      id: Date.now().toString(),
+      password,
+      expiresAt: expiresAt.getTime(),
+      label: 'Novo Acesso 30 Dias'
+    };
+    
+    db.keys.push(newKey);
+    await saveDB(db);
+    
+    req.session.keyId = newKey.id;
+    res.json(newKey);
   });
 
-  // CONFIGURAÇÃO DE ENTREGA DO SITE (FRONTEND)
+  app.post('/api/data', authenticate, async (req, res) => {
+    const { title, value, category } = req.body;
+    const db = await getDB();
+    
+    const newData = {
+      id: Date.now(),
+      key_id: req.session.keyId,
+      title,
+      value,
+      category
+    };
+    
+    db.client_data.push(newData);
+    await saveDB(db);
+    res.json(newData);
+  });
+
+  app.delete('/api/data/:id', authenticate, async (req, res) => {
+    const { id } = req.params;
+    const db = await getDB();
+    
+    db.client_data = db.client_data.filter(
+      (d: any) => !(d.id === Number(id) && d.key_id === req.session.keyId)
+    );
+    
+    await saveDB(db);
+    res.json({ success: true });
+  });
+
+  // Redirect route for "Plataforma" button
+  app.get('/cad', (req, res) => {
+    // User can replace this with their actual affiliate/platform URL
+    const destinationUrl = 'https://go.aff.casadeapostas.bet.br/jg6y1exs'; 
+    res.redirect(destinationUrl);
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -118,18 +220,14 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    // 1. Serve os arquivos estáticos (CSS, JS, Imagens)
     app.use(express.static(distPath));
-    
-    // 2. Rota que entrega o site propriamente dito
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  // Inicia o servidor em 0.0.0.0
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Servidor rodando com sucesso na porta ${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
