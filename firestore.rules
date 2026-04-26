@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+<<<<<<< HEAD
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /live_results/{resultId} {
+      // Allow reading results for the feed
+      allow list: if true;
+      allow get: if true;
+      
+      // Allow creating results to keep the shared feed alive
+      // In a real app this would be a server-side process
+=======
+    
+    // Remova ou comente o bloco match /{document=**} que tem "if false"
+    // Ou mude para permitir leitura se estiver logado:
+    match /{document=**} {
+      allow read: if request.auth != null;
+      allow write: if false; 
+    }
+
+    // Suas regras de live_results (estão boas)
+    match /live_results/{resultId} {
+      allow list, get: if true;
+>>>>>>> 2da9b7fe285f8d4c387b0b8692528170282123a5
+      allow create: if request.auth != null 
+        && request.resource.data.keys().hasAll(['color', 'value', 'time', 'timestamp'])
+        && request.resource.data.color in ['RED', 'BLUE', 'TIE']
+        && request.resource.data.value is number
+        && request.resource.data.timestamp is number;
+<<<<<<< HEAD
+        
+      allow update, delete: if false;
+    }
+
+=======
+      allow update, delete: if false;
+    }
+
+    // Sua função e regras de presets (estão corretas)
+>>>>>>> 2da9b7fe285f8d4c387b0b8692528170282123a5
+    function isValidPreset(data) {
+      return data.name is string && data.name.size() <= 64
+        && data.banca is string && data.banca.size() <= 20
+        && data.meta is string && data.meta.size() <= 10
+        && data.stopLoss is string && data.stopLoss.size() <= 10
+        && data.strategy in ['CONSERVATIVE', 'AGGRESSIVE']
+        && data.userId == request.auth.uid
+        && data.createdAt is number;
+    }
+
+    match /presets/{presetId} {
+      allow list: if request.auth != null;
+      allow get: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && isValidPreset(request.resource.data);
+      allow update: if request.auth != null && resource.data.userId == request.auth.uid && isValidPreset(request.resource.data);
+      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "keys": [
+    {
+      "id": "1777174536603",
+      "password": "$2b$10$m0zhpg89xq11T/UNbyBKf.ATNdqDumHnuS28z0JDnnqpZGiAHlAxa",
+      "expiresAt": 1779766536603,
+      "label": "Acesso Sincronizado Global"
+    }
+  ],
+  "client_data": [],
+  "blacklist": [
+    "$2b$10$bQuKoRMwsGJLGzzOQYhMnuBHx3g723BcQpIvJHhE5YaIBihK/ob8m"
+  ]
+}

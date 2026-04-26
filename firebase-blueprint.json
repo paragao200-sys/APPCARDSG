@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "Result": {
+      "title": "Game Result",
+      "description": "A single result from Football Studio",
+      "type": "object",
+      "properties": {
+        "color": { "type": "string", "enum": ["RED", "BLUE", "TIE"] },
+        "value": { "type": "number" },
+        "time": { "type": "string" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["color", "value", "time", "timestamp"]
+    },
+    "StrategyPreset": {
+      "title": "Strategy Preset",
+      "description": "User saved game strategy parameters",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "banca": { "type": "string" },
+        "meta": { "type": "string" },
+        "stopLoss": { "type": "string" },
+        "strategy": { "type": "string", "enum": ["CONSERVATIVE", "AGGRESSIVE"] },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["name", "banca", "meta", "stopLoss", "strategy", "userId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "live_results": {
+      "schema": "Result",
+      "description": "Collection of recent game results shared across all users"
+    },
+    "presets": {
+      "schema": "StrategyPreset",
+      "description": "Collection of user-specific strategy presets"
+    }
+  }
+}
