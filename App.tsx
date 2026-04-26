@@ -49,7 +49,8 @@ import { IconButton } from './components/ui/IconButton';
 import { SpreadsheetModal } from './components/modals/SpreadsheetModal';
 import { AdminModal } from './components/modals/AdminModal';
 import { LiveFeed } from './components/features/LiveFeed';
-import { FootballStudioStats } from './components/features/FootballStudioStats';
+import { Speed } from './components/features/speed';
+import { RestrictedAccessPanel } from './components/features/RestrictedAccessPanel';
 
 // Hooks
 import { useFirebaseSync } from './hooks/useFirebaseSync';
@@ -140,6 +141,8 @@ export default function App() {
   const [stopLoss, setStopLoss] = useState('20');
   const [lastSignalMinute, setLastSignalMinute] = useState<number | null>(null);
   const [isProfessionalMode, setIsProfessionalMode] = useState(false);
+  const [isAccessUnlocked, setIsAccessUnlocked] = useState(false);
+  const [isAccessPanelOpen, setIsAccessPanelOpen] = useState(false);
   const [liveAssertiveness, setLiveAssertiveness] = useState(94.2);
 
   // Admin States
@@ -448,6 +451,16 @@ export default function App() {
         strategy={strategy} setStrategy={setStrategy}
       />
 
+      <RestrictedAccessPanel 
+        isOpen={isAccessPanelOpen}
+        onClose={() => setIsAccessPanelOpen(false)}
+        onUnlock={() => {
+          setIsAccessUnlocked(true);
+          setIsAccessPanelOpen(false);
+          if (playSound) playSound('SUCCESS');
+        }}
+      />
+
       <AdminModal 
         isOpen={isAdminModalOpen} 
         onClose={() => {
@@ -578,7 +591,7 @@ export default function App() {
            </header>
 
            <div className="w-full relative z-10 flex flex-col gap-4">
-              <FootballStudioStats results={recentResults} gameState={gameState} />
+              <Speed results={recentResults} gameState={gameState} />
               
               <div className="flex flex-col items-center justify-center w-full relative group/terminal">
                  {/* Atmospheric Glow */}
@@ -593,13 +606,21 @@ export default function App() {
                       targetColor={targetColor} targetCard={targetCard} 
                       confidence={confidence} assertiveness={assertiveness}
                       strategy={strategy} lastSignalMinute={lastSignalMinute}
-                      onStart={runTimeline}
+                      onStart={() => {
+                        if (!isAccessUnlocked) {
+                          setIsAccessPanelOpen(true);
+                          return;
+                        }
+                        runTimeline();
+                      }}
                       selectedGame={selectedGame}
                       currentTheme={currentTheme}
                       isProfessionalMode={isProfessionalMode}
                       createRipple={createRipple}
                       runTimeline={runTimeline}
                       playSound={playSound}
+                      isAccessUnlocked={isAccessUnlocked}
+                      onUnlockClick={() => setIsAccessPanelOpen(true)}
                     />
                     
                     <div className="w-full flex gap-6 mt-2 max-w-2xl px-4">
@@ -625,14 +646,6 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full max-w-7xl mx-auto">
-                 <div className="lg:col-span-12">
-                    <SignalLogs 
-                      selectedGame={selectedGame} 
-                      currentTheme={currentTheme} 
-                      isProfessionalMode={isProfessionalMode} 
-                      results={recentResults}
-                    />
-                 </div>
                  <div className="lg:col-span-12">
                     <StrategyBoard selectedGame={selectedGame} currentTheme={currentTheme} isProfessionalMode={isProfessionalMode} />
                  </div>
@@ -678,7 +691,13 @@ function WinsTicker({ wins }: { wins: WinRecord[] }) {
   );
 }
 
-function MainDisplay({ gameState, progress, targetColor, targetCard, confidence, assertiveness, strategy, lastSignalMinute, onStart, selectedGame, currentTheme, isProfessionalMode, createRipple, runTimeline, playSound }: any) {
+function MainDisplay({ 
+  gameState, progress, targetColor, targetCard, confidence, 
+  assertiveness, strategy, lastSignalMinute, onStart, 
+  selectedGame, currentTheme, isProfessionalMode, 
+  createRipple, runTimeline, playSound,
+  isAccessUnlocked, onUnlockClick
+}: any) {
   return (
     <>
       <AnimatePresence>
@@ -727,6 +746,31 @@ function MainDisplay({ gameState, progress, targetColor, targetCard, confidence,
       targetColor === 'RED' ? "shadow-[0_0_50px_rgba(255,0,0,0.2)]" : 
       "shadow-[0_0_50px_rgba(255,215,0,0.2)]"
     )}>
+      {/* Locked Overlay */}
+      {!isAccessUnlocked && (
+        <div className="absolute inset-0 z-50 backdrop-blur-xl bg-black/80 flex flex-col items-center justify-center p-8 text-center">
+          <div className="w-20 h-20 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(59,130,246,0.1)]">
+            <Cpu className="text-blue-500 animate-pulse" size={40} />
+          </div>
+          <h3 className="text-2xl font-black text-white uppercase tracking-[0.2em] italic mb-4">
+            ACESSO <span className="text-blue-500">RESTRITO</span>
+          </h3>
+          <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.3em] mb-10 max-w-xs leading-relaxed">
+            A ferramenta de geração de sinais requer sincronização de chave global criptografada v4.0.1.
+          </p>
+          <button 
+            onClick={onUnlockClick}
+            className="group relative px-10 py-5 rounded-2xl bg-blue-600 overflow-hidden transition-all hover:scale-105 active:scale-95"
+          >
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <span className="relative z-10 text-white text-[11px] font-black uppercase tracking-[0.3em] flex items-center gap-3">
+              <Zap size={14} className="fill-current" />
+              Sincronizar Chave Global
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Decorative Game Pattern Background */}
       <div className="absolute inset-0 opacity-[0.05] pointer-events-none">
         <div className="absolute inset-0 grid grid-cols-4 md:grid-cols-6 gap-12 p-8">
@@ -1074,75 +1118,6 @@ function StrategyButton({ active, onClick, label, icon, theme, shake, isProfessi
   );
 }
 
-function SignalLogs({ selectedGame, results = [] }: any) {
-  const historicalAlerts = React.useMemo(() => {
-    if (!results || results.length === 0) return [];
-    
-    // Sort by timestamp descending to get latest first
-    const sorted = [...results].sort((a: any, b: any) => b.timestamp - a.timestamp);
-    
-    return sorted.slice(0, 20).map((res: any) => ({
-      id: res.id,
-      time: res.time,
-      type: res.color,
-      label: res.color === 'RED' ? 'CASA' : res.color === 'BLUE' ? 'FORA' : 'EMPATE',
-      val1: res.value || Math.floor(Math.random() * 9) + 1,
-      val2: res.color === 'TIE' ? (res.value || 10) : Math.floor(Math.random() * 9) + 1,
-      timestamp: res.timestamp
-    }));
-  }, [results]);
-
-  const renderHistoryItem = (alert: any) => {
-    return (
-      <div key={alert.id} className={cn(
-        "w-20 py-2 rounded-lg flex flex-col items-center justify-center gap-1 border transition-all hover:scale-105 shrink-0",
-        alert.type === 'RED' ? "bg-red-950/20 border-red-500/20 shadow-[inset_0_0_10px_rgba(239,68,68,0.1)]" :
-        alert.type === 'BLUE' ? "bg-blue-950/20 border-blue-500/20 shadow-[inset_0_0_10px_rgba(59,130,246,0.1)]" :
-        "bg-yellow-950/20 border-yellow-500/20 shadow-[inset_0_0_10px_rgba(234,179,8,0.1)]"
-      )}>
-        <span className="text-[7px] font-bold text-white/40 uppercase tracking-tighter">{alert.time}</span>
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] font-black text-white">{alert.val1}x{alert.val2}</span>
-        </div>
-        <span className={cn(
-          "text-[6px] font-black uppercase",
-          alert.type === 'RED' ? "text-red-500" : alert.type === 'BLUE' ? "text-blue-500" : "text-yellow-500"
-        )}>
-          {alert.label}
-        </span>
-      </div>
-    );
-  };
-
-  if (historicalAlerts.length === 0) return (
-    <div className="w-full glass-panel rounded-[20px] p-6 animate-pulse bg-white/5 flex items-center justify-center">
-      <span className="text-[10px] font-bold text-white/20 uppercase tracking-widest">Aguardando Dados da Partida...</span>
-    </div>
-  );
-
-  return (
-    <div className={cn(
-      "w-full glass-panel rounded-[20px] p-6 relative overflow-hidden group transition-all",
-      "bg-black/60 shadow-[0_0_40px_rgba(0,0,0,0.3)] border-white/5"
-    )}>
-      <div className="flex flex-col gap-4 relative z-10">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] italic">
-            HISTÓRICO DE PARTIDAS EM TEMPO REAL
-          </h3>
-          <div className="flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-[8px] font-bold text-green-500/60 uppercase">Live Feed</span>
-          </div>
-        </div>
-
-        <div className="flex gap-3 overflow-x-auto pb-4 custom-scrollbar no-scrollbar scroll-smooth">
-          {historicalAlerts.map((alert: any) => renderHistoryItem(alert))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function StrategyBoard({ selectedGame, isProfessionalMode }: any) {
   const [probableTimes, setProbableTimes] = React.useState<any[]>([]);
