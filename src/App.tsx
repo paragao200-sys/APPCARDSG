@@ -49,8 +49,7 @@ import { IconButton } from './components/ui/IconButton';
 import { SpreadsheetModal } from './components/modals/SpreadsheetModal';
 import { AdminModal } from './components/modals/AdminModal';
 import { LiveFeed } from './components/features/LiveFeed';
-import { Speed } from './components/features/speed';
-import { RestrictedAccessPanel } from './components/features/RestrictedAccessPanel';
+import { FootballStudioStats } from './components/features/FootballStudioStats';
 
 // Hooks
 import { useFirebaseSync } from './hooks/useFirebaseSync';
@@ -112,6 +111,24 @@ const gameThemes = {
   }
 };
 
+// ---------------------------------------------------------------------------
+// FIX #2: wins gerados fora do componente — estáveis, sem Math.random no render
+// ---------------------------------------------------------------------------
+const STATIC_WINS: WinRecord[] = (() => {
+  const names = ['RAFAEL', 'MARIA', 'ANA', 'JOAO', 'PEDRO', 'CARLOS', 'BRUNA', 'Felipe', 'Gustavo', 'Lucas', 'JULIA', 'REBECA', 'PAULO', 'DANIEL', 'MARCOS', 'THIAGO', 'BRUNO', 'RODRIGO', 'ALICE', 'BEATRIZ'];
+  const surNames = ['S', 'P', 'D', 'M', 'Silva', 'Santos', 'Oliveira'];
+  const seededRand = (seed: number) => {
+    const x = Math.sin(seed + 1) * 10000;
+    return x - Math.floor(x);
+  };
+  return Array.from({ length: 40 }).map((_, i) => ({
+    id: `win-static-${i}`,
+    user: `@${names[i % names.length]}_${surNames[i % surNames.length]}`.toUpperCase(),
+    amount: `R$ ${(seededRand(i) * (7000 - 20) + 20).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    type: seededRand(i + 100) > 0.05 ? 'GREEN' : 'GALE WIN'
+  }));
+})();
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -130,10 +147,10 @@ export default function App() {
 
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false); // FIX #5: feedback de loading no login
   const [signalIntensity, setSignalIntensity] = useState(1);
   const [activeNotifications, setActiveNotifications] = useState<PushNotification[]>([]);
   const [showSpreadsheet, setShowSpreadsheet] = useState(false);
-  const [showAudioUnlock, setShowAudioUnlock] = useState(false);
 
   // Management States
   const [banca, setBanca] = useState('100');
@@ -141,8 +158,6 @@ export default function App() {
   const [stopLoss, setStopLoss] = useState('20');
   const [lastSignalMinute, setLastSignalMinute] = useState<number | null>(null);
   const [isProfessionalMode, setIsProfessionalMode] = useState(false);
-  const [isAccessUnlocked, setIsAccessUnlocked] = useState(false);
-  const [isAccessPanelOpen, setIsAccessPanelOpen] = useState(false);
   const [liveAssertiveness, setLiveAssertiveness] = useState(94.2);
 
   // Admin States
@@ -155,42 +170,27 @@ export default function App() {
     const interval = setInterval(() => {
       setLiveAssertiveness(prev => {
         const oscillation = (Math.random() * 2 - 1) * 0.5;
-        const newValue = Math.min(Math.max(88.5, prev + oscillation), 96.1);
-        return parseFloat(newValue.toFixed(1));
+        return parseFloat(Math.min(Math.max(88.5, prev + oscillation), 96.1).toFixed(1));
       });
     }, 6000);
     return () => clearInterval(interval);
   }, []);
 
   const timersRef = useRef<(NodeJS.Timeout | number)[]>([]);
-  const notifIdRef = useRef(0);
 
   // Custom Hooks
   const { recentResults } = useFirebaseSync();
   const { playSound, audioContext } = useAudioSynth(isMuted);
 
   const addNotification = useCallback((text: string, type: 'warning' | 'alert' | 'success') => {
-    const id = Date.now() + Math.random(); // Improved unique ID
+    const id = Date.now() + Math.random();
     setActiveNotifications(prev => [...prev, { id, text, type }]);
     playSound('NOTIFICATION');
-    
     const cleanupTimer = setTimeout(() => {
       setActiveNotifications(prev => prev.filter(n => n.id !== id));
     }, 4000);
     timersRef.current.push(cleanupTimer);
   }, [playSound]);
-
-  const wins = useMemo<WinRecord[]>(() => {
-    const names = ['RAFAEL', 'MARIA', 'ANA', 'JOAO', 'PEDRO', 'CARLOS', 'BRUNA', 'Felipe', 'Gustavo', 'Lucas', 'JULIA', 'REBECA', 'PAULO', 'DANIEL', 'MARCOS', 'THIAGO', 'BRUNO', 'RODRIGO', 'ALICE', 'BEATRIZ'];
-    const surNames = ['S', 'P', 'D', 'M', 'Silva', 'Santos', 'Oliveira'];
-    
-    return Array.from({ length: 40 }).map((_, i) => ({
-      id: `win-${i}-${Math.random()}`, // Guaranteed unique ID
-      user: `@${names[i % names.length]}_${surNames[Math.floor(Math.random() * surNames.length)]}`.toUpperCase(),
-      amount: `R$ ${(Math.random() * (7000 - 20) + 20).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      type: Math.random() > 0.05 ? 'GREEN' : 'GALE WIN'
-    }));
-  }, []);
 
   useEffect(() => {
     fetch('/api/me')
@@ -208,11 +208,7 @@ export default function App() {
 
   useEffect(() => {
     const resumeAudio = () => {
-      if (audioContext?.state === 'suspended') {
-        audioContext.resume().then(() => {
-          console.log('Audio Context Resumed Automatically');
-        });
-      }
+      if (audioContext?.state === 'suspended') audioContext.resume();
     };
     window.addEventListener('click', resumeAudio, { once: true });
     window.addEventListener('touchstart', resumeAudio, { once: true });
@@ -222,22 +218,30 @@ export default function App() {
     };
   }, [audioContext]);
 
+  // FIX #5: handleAuth com loading state
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     audioContext?.resume();
     setAuthError('');
-    const res = await fetch(isLoginView ? '/api/login' : '/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setUser(data);
-      setStage('GAME_SELECT');
-    } else {
-      const data = await res.json();
-      setAuthError(data.error || 'Falha na autenticação.');
+    setAuthLoading(true);
+    try {
+      const res = await fetch(isLoginView ? '/api/login' : '/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data);
+        setStage('GAME_SELECT');
+      } else {
+        const data = await res.json();
+        setAuthError(data.error || 'Falha na autenticação.');
+      }
+    } catch {
+      setAuthError('Erro de conexão. Tente novamente.');
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -249,48 +253,50 @@ export default function App() {
 
   const handleBackToMenu = () => {
     playSound('CLICK');
+    // FIX #4: limpa TODOS os timers pendentes
     timersRef.current.forEach(timer => {
       clearTimeout(timer as any);
       clearInterval(timer as any);
     });
     timersRef.current = [];
     setGameState('IDLE');
+    setProgress(0);
+    setTargetColor(null);
     setStage('GAME_SELECT');
   };
 
+  // FIX #4: runTimeline com todos os timers guardados no ref
   const runTimeline = useCallback(() => {
+    // Cancela qualquer análise anterior
+    timersRef.current.forEach(timer => {
+      clearTimeout(timer as any);
+      clearInterval(timer as any);
+    });
+    timersRef.current = [];
+
     setGameState('ANALYZING');
     setProgress(0);
 
-    const interval = setInterval(() => {
+    const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 100) {
-          clearInterval(interval);
+          clearInterval(progressInterval);
           return 100;
         }
         return prev + 5;
       });
     }, 150);
-    timersRef.current.push(interval);
+    timersRef.current.push(progressInterval);
 
-    setTimeout(() => {
+    const signalTimeout = setTimeout(() => {
       const minute = new Date().getMinutes();
       let color: SignalColor;
       
       if (strategy === 'AGGRESSIVE') {
-        // Gale 1 specific logic:
-        // Neutros (0) -> Vermelho
-        // Ímpares -> Vermelho
-        // Pares -> Azul
-        if (minute % 10 === 0) {
-          color = 'RED';
-        } else if (minute % 2 !== 0) {
-          color = 'RED';
-        } else {
-          color = 'BLUE';
-        }
+        if (minute % 10 === 0) color = 'RED';
+        else if (minute % 2 !== 0) color = 'RED';
+        else color = 'BLUE';
       } else {
-        // Sem Gale (CONSERVATIVE): Don't touch, keep existing logic
         color = Math.random() > 0.5 ? 'BLUE' : 'RED';
       }
       
@@ -301,16 +307,30 @@ export default function App() {
       setLastSignalMinute(minute);
       setGameState('SIGNAL_FOUND');
       setSignalIntensity(2.5);
-      
+
       const intensityFade = setInterval(() => setSignalIntensity(p => Math.max(1, p - 0.05)), 100);
       timersRef.current.push(intensityFade);
 
-      setTimeout(() => {
+      const waitingTimeout = setTimeout(() => {
         setGameState('WAITING');
-        setTimeout(() => setGameState('IDLE'), 10000);
+        const idleTimeout = setTimeout(() => setGameState('IDLE'), 10000);
+        timersRef.current.push(idleTimeout);
       }, 25000);
+      timersRef.current.push(waitingTimeout);
+
     }, 4000);
+    timersRef.current.push(signalTimeout);
   }, [strategy]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach(timer => {
+        clearTimeout(timer as any);
+        clearInterval(timer as any);
+      });
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -351,23 +371,18 @@ export default function App() {
   const dailyMetaAmount = (Number(banca) || 0) * (Number(meta) || 0) / 100;
   const stakeRecomendada = (Number(banca) || 0) * (Number(meta) === 10 ? 0.1 : 0.05);
 
-  // Ripple Effect Handler
   const createRipple = (event: React.MouseEvent<HTMLElement>) => {
     const button = event.currentTarget;
     const circle = document.createElement("span");
     const diameter = Math.max(button.clientWidth, button.clientHeight);
     const radius = diameter / 2;
-
     const rect = button.getBoundingClientRect();
-
     circle.style.width = circle.style.height = `${diameter}px`;
     circle.style.left = `${event.clientX - rect.left - radius}px`;
     circle.style.top = `${event.clientY - rect.top - radius}px`;
     circle.classList.add("ripple");
-
     const ripple = button.getElementsByClassName("ripple")[0];
-    if (ripple) { ripple.remove(); }
-
+    if (ripple) ripple.remove();
     button.appendChild(circle);
   };
 
@@ -386,10 +401,8 @@ export default function App() {
   return (
     <TooltipProvider>
     <AnimatePresence mode="wait">
-      {/* Global Red/Blue Deep Background */}
       <div className="fixed inset-0 z-[-3] bg-black" />
       
-      {/* Invisible Admin Trigger */}
       <button 
         onClick={() => setIsAdminModalOpen(true)}
         className="fixed top-0 right-0 w-12 h-12 z-[1000] opacity-0 cursor-default"
@@ -397,7 +410,6 @@ export default function App() {
       />
       <div className="fixed inset-0 z-[-3] opacity-40 bg-[radial-gradient(circle_at_5%_5%,rgba(255,0,0,0.2)_0%,transparent_40%),radial-gradient(circle_at_95%_95%,rgba(0,136,255,0.2)_0%,transparent_40%)]" />
 
-      {/* Brand Background Image - Global */}
       <div className="fixed inset-0 z-[-2] pointer-events-none overflow-hidden flex items-center justify-center opacity-[0.45]">
         <div className="absolute inset-0 bg-black" />
         <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black" />
@@ -422,7 +434,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Notifications */}
       <div className="fixed top-24 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
         <AnimatePresence>
           {activeNotifications.map(n => (
@@ -451,22 +462,9 @@ export default function App() {
         strategy={strategy} setStrategy={setStrategy}
       />
 
-      <RestrictedAccessPanel 
-        isOpen={isAccessPanelOpen}
-        onClose={() => setIsAccessPanelOpen(false)}
-        onUnlock={() => {
-          setIsAccessUnlocked(true);
-          setIsAccessPanelOpen(false);
-          if (playSound) playSound('SUCCESS');
-        }}
-      />
-
       <AdminModal 
         isOpen={isAdminModalOpen} 
-        onClose={() => {
-          setIsAdminModalOpen(false);
-          setAdminAuthKey('');
-        }}
+        onClose={() => { setIsAdminModalOpen(false); setAdminAuthKey(''); }}
         isAuthenticated={isAdminAuthenticated}
         onAuthenticate={(key) => {
           if (key === 'Speedcardsg' || key === 'SPEEDSG!@#$%^&*') {
@@ -479,7 +477,13 @@ export default function App() {
       />
 
       {stage === 'AUTH' && !user && (
-        <AuthScreen key="auth" isLoginView={isLoginView} setIsLoginView={setIsLoginView} password={password} setPassword={setPassword} authError={authError} handleAuth={handleAuth} />
+        <AuthScreen 
+          key="auth" 
+          isLoginView={isLoginView} setIsLoginView={setIsLoginView} 
+          password={password} setPassword={setPassword} 
+          authError={authError} authLoading={authLoading}
+          handleAuth={handleAuth} 
+        />
       )}
 
       {stage === 'GAME_SELECT' && (
@@ -500,13 +504,9 @@ export default function App() {
               : (currentTheme?.bg || "bg-black")
           )}
         >
-            {/* IA Scanner Line */}
             <div className="scanner-line fixed inset-0 h-[110vh]" style={{ '--scanner-color': isProfessionalMode ? '#50C878' : (targetColor === 'BLUE' ? '#0088FF' : '#FF0000') } as any} />
-            
-            {/* Ambient Red Glow */}
             <div className="fixed inset-0 pointer-events-none z-[-1] bg-[radial-gradient(circle_at_50%_120%,rgba(255,0,0,0.15)_0%,transparent_60%)]" />
 
-            {/* Atmospheric Flare - Optimized with CSS Gradient instead of Blur Filter */}
             {gameState === 'SIGNAL_FOUND' && (
               <motion.div 
                 animate={{ opacity: [0.05, 0.15, 0.05] }}
@@ -521,7 +521,7 @@ export default function App() {
               />
             )}
 
-           <WinsTicker wins={wins} />
+           <WinsTicker wins={STATIC_WINS} />
 
            <header className="w-full flex items-center justify-between mb-8 px-2 relative z-10 transition-all duration-700">
               <div className="flex items-center gap-4">
@@ -536,19 +536,17 @@ export default function App() {
                 <div>
                   <h1 className="font-display font-black text-2xl tracking-tighter leading-none italic text-white flex flex-col md:flex-row md:items-center md:gap-2">
                     SPEED CARDS 
-                    <span className={cn(
-                      "transition-colors duration-500",
-                      isProfessionalMode ? "text-prof-emerald" : "text-bet-blue"
-                    )}>
+                    <span className={cn("transition-colors duration-500", isProfessionalMode ? "text-prof-emerald" : "text-bet-blue")}>
                       {selectedGame === 'BACCARAT' ? 'SPEED BACCARAT BRASILEIRO' : selectedGame?.replace('_', ' ')}
                     </span>
                   </h1>
-                  <div className="flex items-center gap-1.5 text-[8px] font-bold text-bet-tie uppercase tracking-widest"><span className="w-1 h-1 rounded-full bg-bet-tie animate-ping" /> Sincronizado</div>
+                  <div className="flex items-center gap-1.5 text-[8px] font-bold text-bet-tie uppercase tracking-widest">
+                    <span className="w-1 h-1 rounded-full bg-bet-tie animate-ping" /> Sincronizado
+                  </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-4">
-                {/* Assertiveness Bar */}
                 <Tooltip content="Precisão em tempo real calculada pela rede neural baseada no histórico recente">
                   <div className="hidden lg:flex flex-col gap-1.5 mr-6 w-48 transition-all duration-700 cursor-help">
                     <div className="flex justify-between items-end">
@@ -557,17 +555,13 @@ export default function App() {
                     </div>
                     <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden border border-white/5">
                       <motion.div 
-                        animate={{ 
-                          width: `${liveAssertiveness}%`,
-                          boxShadow: `0 0 15px rgba(80, 200, 120, ${liveAssertiveness / 100})`
-                        }}
+                        animate={{ width: `${liveAssertiveness}%`, boxShadow: `0 0 15px rgba(80, 200, 120, ${liveAssertiveness / 100})` }}
                         className="h-full bg-gradient-to-r from-prof-emerald/40 to-prof-emerald rounded-full"
                       />
                     </div>
                   </div>
                 </Tooltip>
 
-                {/* Theme Toggle */}
                 <Tooltip content={isProfessionalMode ? "Mudar para interface original simplificada" : "Interface avançada com telemetria detalhada"}>
                   <button 
                     onClick={() => setIsProfessionalMode(!isProfessionalMode)}
@@ -591,10 +585,12 @@ export default function App() {
            </header>
 
            <div className="w-full relative z-10 flex flex-col gap-4">
-              <Speed results={recentResults} gameState={gameState} />
+              {/* FIX #1: FootballStudioStats apenas para Football Studio */}
+              {selectedGame === 'FOOTBALL_STUDIO' && (
+                <FootballStudioStats results={recentResults} gameState={gameState} />
+              )}
               
               <div className="flex flex-col items-center justify-center w-full relative group/terminal">
-                 {/* Atmospheric Glow */}
                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] aspect-square bg-bet-blue/5 rounded-full blur-[100px] pointer-events-none transition-all duration-1000 group-hover/terminal:bg-bet-blue/10" />
                  
                  <div className="w-full lg:max-w-4xl flex flex-col items-center gap-4 relative z-10">
@@ -606,21 +602,13 @@ export default function App() {
                       targetColor={targetColor} targetCard={targetCard} 
                       confidence={confidence} assertiveness={assertiveness}
                       strategy={strategy} lastSignalMinute={lastSignalMinute}
-                      onStart={() => {
-                        if (!isAccessUnlocked) {
-                          setIsAccessPanelOpen(true);
-                          return;
-                        }
-                        runTimeline();
-                      }}
+                      onStart={runTimeline}
                       selectedGame={selectedGame}
                       currentTheme={currentTheme}
                       isProfessionalMode={isProfessionalMode}
                       createRipple={createRipple}
                       runTimeline={runTimeline}
                       playSound={playSound}
-                      isAccessUnlocked={isAccessUnlocked}
-                      onUnlockClick={() => setIsAccessPanelOpen(true)}
                     />
                     
                     <div className="w-full flex gap-6 mt-2 max-w-2xl px-4">
@@ -647,11 +635,12 @@ export default function App() {
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full max-w-7xl mx-auto">
                  <div className="lg:col-span-12">
+                    <SignalLogs selectedGame={selectedGame} currentTheme={currentTheme} isProfessionalMode={isProfessionalMode} results={recentResults} />
+                 </div>
+                 <div className="lg:col-span-12">
                     <StrategyBoard selectedGame={selectedGame} currentTheme={currentTheme} isProfessionalMode={isProfessionalMode} />
                  </div>
               </div>
-
-
            </div>
         </motion.div>
       )}
@@ -691,13 +680,7 @@ function WinsTicker({ wins }: { wins: WinRecord[] }) {
   );
 }
 
-function MainDisplay({ 
-  gameState, progress, targetColor, targetCard, confidence, 
-  assertiveness, strategy, lastSignalMinute, onStart, 
-  selectedGame, currentTheme, isProfessionalMode, 
-  createRipple, runTimeline, playSound,
-  isAccessUnlocked, onUnlockClick
-}: any) {
+function MainDisplay({ gameState, progress, targetColor, targetCard, confidence, assertiveness, strategy, lastSignalMinute, onStart, selectedGame, currentTheme, isProfessionalMode, createRipple, runTimeline, playSound }: any) {
   return (
     <>
       <AnimatePresence>
@@ -736,391 +719,286 @@ function MainDisplay({
       </AnimatePresence>
 
       <div className={cn(
-      "w-full relative glass-panel rounded-[20px] overflow-hidden flex flex-col items-center p-8 min-h-[400px] md:min-h-[480px] border border-white/10 group transition-all duration-1000",
-      isProfessionalMode 
-        ? "bg-prof-graphite/40 border-white/5 backdrop-blur-2xl"
-        : (selectedGame === 'BACCARAT' ? "bg-baccarat-blue" :
-           selectedGame === 'BACBO' ? "bg-bacbo-bg" :
-           "bg-football-bg"),
-      targetColor === 'BLUE' ? "shadow-[0_0_50px_rgba(0,136,255,0.2)]" : 
-      targetColor === 'RED' ? "shadow-[0_0_50px_rgba(255,0,0,0.2)]" : 
-      "shadow-[0_0_50px_rgba(255,215,0,0.2)]"
-    )}>
-      {/* Locked Overlay */}
-      {!isAccessUnlocked && (
-        <div className="absolute inset-0 z-50 backdrop-blur-xl bg-black/80 flex flex-col items-center justify-center p-8 text-center">
-          <div className="w-20 h-20 rounded-3xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(59,130,246,0.1)]">
-            <Cpu className="text-blue-500 animate-pulse" size={40} />
+        "w-full relative glass-panel rounded-[20px] overflow-hidden flex flex-col items-center p-8 min-h-[400px] md:min-h-[480px] border border-white/10 group transition-all duration-1000",
+        isProfessionalMode 
+          ? "bg-prof-graphite/40 border-white/5 backdrop-blur-2xl"
+          : (selectedGame === 'BACCARAT' ? "bg-baccarat-blue" :
+             selectedGame === 'BACBO' ? "bg-bacbo-bg" :
+             "bg-football-bg"),
+        targetColor === 'BLUE' ? "shadow-[0_0_50px_rgba(0,136,255,0.2)]" : 
+        targetColor === 'RED' ? "shadow-[0_0_50px_rgba(255,0,0,0.2)]" : 
+        "shadow-[0_0_50px_rgba(255,215,0,0.2)]"
+      )}>
+        <div className="absolute inset-0 opacity-[0.05] pointer-events-none">
+          <div className="absolute inset-0 grid grid-cols-4 md:grid-cols-6 gap-12 p-8">
+            {[...Array(24)].map((_, i) => {
+              let Icon = Spade;
+              if (selectedGame === 'BACCARAT') {
+                const icons = [Spade, Heart, Club, Diamond];
+                Icon = icons[i % icons.length];
+              } else if (selectedGame === 'BACBO') {
+                Icon = Dices;
+              } else {
+                Icon = Trophy;
+              }
+              return (
+                <motion.div
+                  key={`decorative-pattern-icon-${i}`}
+                  animate={{ rotate: [0, 10, -10, 0], y: [0, 10, 0] }}
+                  transition={{ duration: 5 + (i % 5), repeat: Infinity, delay: i % 5 }}
+                  className="flex items-center justify-center"
+                >
+                  <Icon size={64} className="text-white" />
+                </motion.div>
+              );
+            })}
           </div>
-          <h3 className="text-2xl font-black text-white uppercase tracking-[0.2em] italic mb-4">
-            ACESSO <span className="text-blue-500">RESTRITO</span>
-          </h3>
-          <p className="text-[10px] font-bold text-white/40 uppercase tracking-[0.3em] mb-10 max-w-xs leading-relaxed">
-            A ferramenta de geração de sinais requer sincronização de chave global criptografada v4.0.1.
-          </p>
-          <button 
-            onClick={onUnlockClick}
-            className="group relative px-10 py-5 rounded-2xl bg-blue-600 overflow-hidden transition-all hover:scale-105 active:scale-95"
-          >
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-blue-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <span className="relative z-10 text-white text-[11px] font-black uppercase tracking-[0.3em] flex items-center gap-3">
-              <Zap size={14} className="fill-current" />
-              Sincronizar Chave Global
-            </span>
-          </button>
         </div>
-      )}
 
-      {/* Decorative Game Pattern Background */}
-      <div className="absolute inset-0 opacity-[0.05] pointer-events-none">
-        <div className="absolute inset-0 grid grid-cols-4 md:grid-cols-6 gap-12 p-8">
-          {[...Array(24)].map((_, i) => {
-            let Icon = Spade;
-            if (selectedGame === 'BACCARAT') {
-              const icons = [Spade, Heart, Club, Diamond];
-              Icon = icons[i % icons.length];
-            } else if (selectedGame === 'BACBO') {
-              Icon = Dices;
-            } else {
-              Icon = Trophy;
-            }
-            
-            return (
-              <motion.div
-                key={`decorative-pattern-icon-${i}`}
-                animate={{ 
-                  rotate: [0, 10, -10, 0],
-                  y: [0, 10, 0]
-                }}
-                transition={{ 
-                  duration: 5 + Math.random() * 5, 
-                  repeat: Infinity,
-                  delay: Math.random() * 5
-                }}
-                className="flex items-center justify-center"
-              >
-                <Icon size={64} className="text-white" />
-              </motion.div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="flex-1 flex flex-col items-center justify-center w-full relative z-10 pt-8">
-        <AnimatePresence mode="wait">
-          {(gameState === 'IDLE' || gameState === 'WAITING' && progress === 0) && (
-            <motion.div key="idle" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} className="flex flex-col items-center text-center">
-              <motion.div
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="mb-2 flex items-center gap-2 px-3 py-1 rounded-full bg-bet-blue/10 border border-bet-blue/20"
-              >
-                <div className="w-1.5 h-1.5 rounded-full bg-bet-blue animate-pulse" />
-                <span className="text-[9px] font-black text-bet-blue uppercase tracking-widest">Bot Ativo • Sincronizado</span>
-              </motion.div>
-              
-              <motion.div 
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                className="w-32 h-32 bg-gradient-to-br from-bet-blue to-[#004488] rounded-full flex items-center justify-center mb-4 cursor-pointer shadow-[0_0_50px_rgba(0,136,255,0.4)] border-4 border-white/20 relative group/btn" 
-                onClick={onStart}
-              >
-                <div className="absolute inset-0 rounded-full animate-ping bg-bet-blue/30 opacity-0 group-hover/btn:opacity-100" />
-                <Play className="text-white fill-current ml-2 transition-transform group-hover/btn:scale-110" size={56} />
+        <div className="flex-1 flex flex-col items-center justify-center w-full relative z-10 pt-8">
+          <AnimatePresence mode="wait">
+            {/* FIX #3: condição corrigida — apenas IDLE mostra tela inicial */}
+            {gameState === 'IDLE' && (
+              <motion.div key="idle" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} className="flex flex-col items-center text-center">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="mb-2 flex items-center gap-2 px-3 py-1 rounded-full bg-bet-blue/10 border border-bet-blue/20"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-bet-blue animate-pulse" />
+                  <span className="text-[9px] font-black text-bet-blue uppercase tracking-widest">Bot Ativo • Sincronizado</span>
+                </motion.div>
                 
-                {/* Micro-glow ornaments */}
-                <div className="absolute -top-2 -right-2 w-8 h-8 bg-bet-blue/20 rounded-full blur-md animate-pulse" />
-                <div className="absolute -bottom-2 -left-2 w-8 h-8 bg-bet-blue/20 rounded-full blur-md animate-pulse delay-700" />
+                <motion.div 
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="w-32 h-32 bg-gradient-to-br from-bet-blue to-[#004488] rounded-full flex items-center justify-center mb-4 cursor-pointer shadow-[0_0_50px_rgba(0,136,255,0.4)] border-4 border-white/20 relative group/btn" 
+                  onClick={onStart}
+                >
+                  <div className="absolute inset-0 rounded-full animate-ping bg-bet-blue/30 opacity-0 group-hover/btn:opacity-100" />
+                  <Play className="text-white fill-current ml-2 transition-transform group-hover/btn:scale-110" size={56} />
+                  <div className="absolute -top-2 -right-2 w-8 h-8 bg-bet-blue/20 rounded-full blur-md animate-pulse" />
+                  <div className="absolute -bottom-2 -left-2 w-8 h-8 bg-bet-blue/20 rounded-full blur-md animate-pulse delay-700" />
+                </motion.div>
+                
+                <h2 className="text-5xl md:text-6xl font-display font-black uppercase italic mb-6 tracking-tighter text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all">
+                  TERMINAL <span className="text-bet-blue">PRONTO</span>
+                </h2>
+                
+                <div className="px-10 py-3 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm relative overflow-hidden group/inject">
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover/inject:translate-x-full transition-transform duration-1000" />
+                  <span className="text-white/40 text-[11px] uppercase font-black tracking-[0.6em] animate-pulse relative z-10 transition-colors group-hover/inject:text-white/60">Injete para Continuar</span>
+                </div>
               </motion.div>
-              
-              <h2 className="text-5xl md:text-6xl font-display font-black uppercase italic mb-6 tracking-tighter text-white drop-shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all">
-                TERMINAL <span className="text-bet-blue">PRONTO</span>
-              </h2>
-              
-              <div className="px-10 py-3 bg-white/5 rounded-full border border-white/10 backdrop-blur-sm relative overflow-hidden group/inject">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover/inject:translate-x-full transition-transform duration-1000" />
-                <span className="text-white/40 text-[11px] uppercase font-black tracking-[0.6em] animate-pulse relative z-10 transition-colors group-hover/inject:text-white/60">Injete para Continuar</span>
-              </div>
-            </motion.div>
-          )}
+            )}
 
-          {gameState === 'ANALYZING' && (
-            <motion.div key="analyzing" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center w-full relative">
-               {isProfessionalMode && (
-                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none mix-blend-overlay" />
-               )}
-               
-               <div className="w-full max-w-lg aspect-[1.8/1] bg-black/60 rounded-[32px] overflow-hidden mb-4 border-2 border-bet-blue/30 relative shadow-[0_0_60px_rgba(0,209,255,0.1)]">
-                  <div className="absolute inset-0 bg-gradient-to-b from-bet-blue/10 to-transparent pointer-events-none" />
-                  
-                  {isProfessionalMode && (
-                    <div className="absolute inset-0 animate-matrix opacity-20 pointer-events-none" style={{ backgroundImage: "linear-gradient(rgba(80,200,120,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(80,200,120,0.1) 1px, transparent 1px)", backgroundSize: "20px 20px" }} />
-                  )}
-
-                  <Canvas camera={{ position: [0, 0, 4] }}>
-                    <CyberCore />
-                  </Canvas>
-                  <motion.div 
-                    animate={{ opacity: [0.4, 1, 0.4] }}
-                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                    className={cn(
-                      "absolute inset-x-0 bottom-0 py-4 bg-black/80 text-center font-black text-[14px] tracking-[0.8em] border-t flex items-center justify-center gap-3",
-                      isProfessionalMode ? "text-prof-emerald border-prof-emerald/20" : "text-bet-blue border-bet-blue/20"
-                    )}
-                  >
-                    <Cpu size={16} className="animate-spin-slow" /> {isProfessionalMode ? "AI DEEP ANALYSIS..." : "SCANNING FOR SIGNALS..."}
-                  </motion.div>
-               </div>
-               <div className="w-full max-w-sm flex flex-col items-center gap-4">
-                  <div className={cn(
-                    "w-full h-2 rounded-full overflow-hidden border",
-                    isProfessionalMode ? "bg-prof-black border-prof-emerald/30 shadow-[inset_0_0_10px_rgba(80,200,120,0.1)]" : "bg-white/5 border-white/10 shadow-inner"
-                  )}>
+            {gameState === 'ANALYZING' && (
+              <motion.div key="analyzing" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center w-full relative">
+                 <div className="w-full max-w-lg aspect-[1.8/1] bg-black/60 rounded-[32px] overflow-hidden mb-4 border-2 border-bet-blue/30 relative shadow-[0_0_60px_rgba(0,209,255,0.1)]">
+                    <div className="absolute inset-0 bg-gradient-to-b from-bet-blue/10 to-transparent pointer-events-none" />
+                    <Canvas camera={{ position: [0, 0, 4] }}>
+                      <CyberCore />
+                    </Canvas>
                     <motion.div 
+                      animate={{ opacity: [0.4, 1, 0.4] }}
+                      transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
                       className={cn(
-                        "h-full",
-                        isProfessionalMode ? "bg-prof-emerald shadow-[0_0_15px_rgba(80,200,120,0.8)]" : "bg-gradient-to-r from-bet-blue to-white shadow-[0_0_15px_rgba(0,209,255,0.8)]"
+                        "absolute inset-x-0 bottom-0 py-4 bg-black/80 text-center font-black text-[14px] tracking-[0.8em] border-t flex items-center justify-center gap-3",
+                        isProfessionalMode ? "text-prof-emerald border-prof-emerald/20" : "text-bet-blue border-bet-blue/20"
                       )}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${progress}%` }}
-                    />
-                  </div>
-                  <span className={cn(
-                    "font-black uppercase text-[12px] tracking-[0.4em] italic drop-shadow-glow",
-                    isProfessionalMode ? "text-prof-emerald font-mono" : "text-bet-blue"
-                  )}>
-                    PROCESSO EM {progress}%
-                  </span>
-               </div>
-            </motion.div>
-          )}
-
-          {gameState === 'SIGNAL_FOUND' && (
-            <motion.div key="signal" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex flex-col items-center w-full">
-               <div className="relative mb-12">
-                 <div className="absolute -inset-16 pointer-events-none opacity-20">
-                    <motion.div animate={{ rotate: -15, x: -20 }} className="absolute left-0 top-1/2 -translate-y-1/2 w-32 h-44 border-2 border-white/20 rounded-2xl bg-white/5 backdrop-blur-sm" />
-                    <motion.div animate={{ rotate: 15, x: 20 }} className="absolute right-0 top-1/2 -translate-y-1/2 w-32 h-44 border-2 border-white/20 rounded-2xl bg-white/5 backdrop-blur-sm" />
+                    >
+                      <Cpu size={16} className="animate-spin-slow" /> {isProfessionalMode ? "AI DEEP ANALYSIS..." : "SCANNING FOR SIGNALS..."}
+                    </motion.div>
                  </div>
+                 <div className="w-full max-w-sm flex flex-col items-center gap-4">
+                    <div className={cn("w-full h-2 rounded-full overflow-hidden border", isProfessionalMode ? "bg-prof-black border-prof-emerald/30" : "bg-white/5 border-white/10 shadow-inner")}>
+                      <motion.div 
+                        className={cn("h-full", isProfessionalMode ? "bg-prof-emerald shadow-[0_0_15px_rgba(80,200,120,0.8)]" : "bg-gradient-to-r from-bet-blue to-white shadow-[0_0_15px_rgba(0,209,255,0.8)]")}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${progress}%` }}
+                      />
+                    </div>
+                    <span className={cn("font-black uppercase text-[12px] tracking-[0.4em] italic", isProfessionalMode ? "text-prof-emerald font-mono" : "text-bet-blue")}>
+                      PROCESSO EM {progress}%
+                    </span>
+                 </div>
+              </motion.div>
+            )}
 
-                  <Tooltip content={targetColor === 'TIE' ? "Probabilidade de empate detectada" : `Entrada confirmada para ${
-                    selectedGame === 'FOOTBALL_STUDIO' 
-                      ? (targetColor === 'BLUE' ? 'VISITANTE' : 'CASA')
-                      : (targetColor === 'BLUE' ? 'PLAYER' : 'BANKER')
-                  }`}>
+            {gameState === 'SIGNAL_FOUND' && (
+              <motion.div key="signal" initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="flex flex-col items-center w-full">
+                 <div className="relative mb-12">
+                   <div className="absolute -inset-16 pointer-events-none opacity-20">
+                      <motion.div animate={{ rotate: -15, x: -20 }} className="absolute left-0 top-1/2 -translate-y-1/2 w-32 h-44 border-2 border-white/20 rounded-2xl bg-white/5 backdrop-blur-sm" />
+                      <motion.div animate={{ rotate: 15, x: 20 }} className="absolute right-0 top-1/2 -translate-y-1/2 w-32 h-44 border-2 border-white/20 rounded-2xl bg-white/5 backdrop-blur-sm" />
+                   </div>
                     <motion.div 
                       animate={{ 
                         y: [0, -10, 0],
                         boxShadow: targetColor === 'BLUE' 
-                          ? (selectedGame === 'BACCARAT' ? ["0 0 40px rgba(65,105,225,0.4)", "0 0 80px rgba(65,105,225,0.6)", "0 0 40px rgba(65,105,225,0.4)"] : ["0 0 40px rgba(0,136,255,0.4)", "0 0 80px rgba(0,136,255,0.6)", "0 0 40px rgba(0,136,255,0.4)"])
-                          : (selectedGame === 'BACCARAT' ? ["0 0 40px rgba(150,0,24,0.4)", "0 0 80px rgba(150,0,24,0.6)", "0 0 40px rgba(150,0,24,0.4)"] : ["0 0 40px rgba(255,0,0,0.4)", "0 0 80px rgba(255,0,0,0.6)", "0 0 40px rgba(255,0,0,0.4)"])
+                          ? ["0 0 40px rgba(0,136,255,0.4)", "0 0 80px rgba(0,136,255,0.6)", "0 0 40px rgba(0,136,255,0.4)"]
+                          : ["0 0 40px rgba(255,0,0,0.4)", "0 0 80px rgba(255,0,0,0.6)", "0 0 40px rgba(255,0,0,0.4)"]
                       }}
                       transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
                       className={cn(
-                        "w-[280px] md:w-[360px] aspect-square rounded-[60px] flex flex-col items-center justify-center relative shadow-[0_0_60px_rgba(0,0,0,0.8)] border-[6px] border-white/20 overflow-hidden animate-signal-pulse animate-border-pulse cursor-help",
-                        isProfessionalMode && "border-white/5",
-                        selectedGame === 'BACCARAT' 
-                          ? (targetColor === 'BLUE' ? "bg-gradient-to-br from-[#4169E1] to-[#001a33]" : "bg-gradient-to-br from-[#960018] to-[#3d000a]")
-                          : (targetColor === 'BLUE' ? "bg-gradient-to-br from-[#0088FF] to-[#011a68]" : "bg-gradient-to-br from-[#FF0000] to-[#600000]")
+                        "w-[280px] md:w-[360px] aspect-square rounded-[60px] flex flex-col items-center justify-center relative shadow-[0_0_60px_rgba(0,0,0,0.8)] border-[6px] border-white/20 overflow-hidden",
+                        targetColor === 'BLUE' ? "bg-gradient-to-br from-[#0088FF] to-[#011a68]" : "bg-gradient-to-br from-[#FF0000] to-[#600000]"
                       )}
-                      style={{
-                        "--pulse-color": targetColor === 'BLUE' ? (isProfessionalMode ? '#50C878' : '#0088FF') : targetColor === 'RED' ? '#FF0000' : (isProfessionalMode ? '#D4AF37' : '#FFD700')
-                      } as any}
                     >
                        <div className="absolute inset-0 bg-white/5 animate-pulse mix-blend-overlay" />
-                       <div className={cn(
-                         "absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.2)_0%,transparent_70%)]",
-                         isProfessionalMode && (targetColor === 'BLUE' ? "shadow-[inset_0_0_50px_rgba(80,200,120,0.4)]" : targetColor === 'RED' ? "shadow-[inset_0_0_50px_rgba(255,0,0,0.4)]" : "shadow-[inset_0_0_50px_rgba(212,175,55,0.4)]")
-                       )} />
-                       
-                       {/* Game Specific Watermark */}
+                       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.2)_0%,transparent_70%)]" />
                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[120px] font-black text-white/[0.03] pointer-events-none select-none uppercase -rotate-12 italic tracking-tighter">
                          {selectedGame === 'BACCARAT' ? 'BACCARAT' : selectedGame === 'BACBO' ? 'BACBO' : 'FOOTBALL'}
                        </div>
-  
-                        <motion.h3 
-                          animate={{ 
-                            scale: [0.98, 1.02, 0.98],
-                            x: selectedGame === 'BACCARAT' && gameState === 'SIGNAL_FOUND' ? [0, 5, -5, 0] : 0
-                          }}
-                          transition={{ duration: 1.5, repeat: Infinity }}
-                          className={cn(
-                            "text-6xl md:text-7xl font-black text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.9)] italic uppercase tracking-tighter relative z-10 text-center px-4",
-                            isProfessionalMode ? "font-mono" : "font-display"
-                          )}
-                        >
-                          {targetColor === 'TIE' ? 'EMPATE' : (
-                            selectedGame === 'FOOTBALL_STUDIO'
-                              ? (targetColor === 'BLUE' ? 'AWAY' : 'HOME')
-                              : (targetColor === 'BLUE' ? 'PLAYER' : 'BANKER')
-                          )}
-                        </motion.h3>
-                       
+                      <motion.h3 
+                         animate={{ scale: [0.98, 1.02, 0.98] }}
+                         transition={{ duration: 1.5, repeat: Infinity }}
+                         className="text-6xl md:text-7xl font-black text-white drop-shadow-[0_4px_30px_rgba(0,0,0,0.9)] italic uppercase tracking-tighter relative z-10 text-center px-4"
+                       >
+                         {targetColor === 'BLUE' 
+                           ? (selectedGame === 'BACCARAT' ? 'PLAYER' : selectedGame === 'FOOTBALL_STUDIO' ? 'AWAY' : 'PLAYER') 
+                           : targetColor === 'RED' 
+                           ? (selectedGame === 'BACCARAT' ? 'BANKER' : selectedGame === 'FOOTBALL_STUDIO' ? 'HOME' : 'BANKER') 
+                           : 'EMPATE'}
+                       </motion.h3>
                        <div className="flex gap-10 mt-10 text-white/40 relative z-10">
-                         <motion.div 
-                           initial={selectedGame === 'BACCARAT' ? { x: -50, opacity: 0 } : {}}
-                           animate={selectedGame === 'BACCARAT' ? { x: 0, opacity: 1 } : { rotate: [0, 10, 0] }} 
-                           transition={{ duration: 2, repeat: Infinity }}
-                         >
+                         <motion.div animate={{ rotate: [0, 10, 0] }} transition={{ duration: 2, repeat: Infinity }}>
                            {selectedGame === 'BACBO' ? <Dices size={44} /> : <Spade size={44} fill="currentColor" strokeWidth={0} />} 
                          </motion.div>
-                         <motion.div 
-                           initial={selectedGame === 'BACCARAT' ? { x: 50, opacity: 0 } : {}}
-                           animate={selectedGame === 'BACCARAT' ? { x: 0, opacity: 1 } : { rotate: [0, -10, 0] }} 
-                           transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
-                         >
+                         <motion.div animate={{ rotate: [0, -10, 0] }} transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}>
                            {selectedGame === 'BACBO' ? <Dices size={44} /> : <Heart size={44} fill="currentColor" strokeWidth={0} />}
                          </motion.div>
                        </div>
                     </motion.div>
-                  </Tooltip>
-               </div>
-               
-               <div className="w-full max-w-md grid grid-cols-2 gap-6 mt-4">
-                 <Tooltip content="Valor da carta alvo detectado pelo scanner de IA para esta rodada">
-                   <div className={cn(
-                     "p-10 rounded-[20px] flex flex-col items-center justify-center gap-2 border transition-all shadow-2xl relative overflow-hidden group/box hover:scale-[1.05] cursor-help",
-                     isProfessionalMode 
-                      ? "bg-prof-black border-white/5 shadow-[inset_0_0_20px_rgba(255,255,255,0.05)]" 
-                      : "bg-gradient-to-br from-white/[0.05] to-transparent border-white/5 hover:border-white/10"
-                   )}>
-                      <div className="absolute top-2 right-4 opacity-5 group-hover/box:opacity-10 transition-opacity">
-                         <Spade size={40} />
-                      </div>
-                      <span className={cn(
-                        "text-[10px] text-white/30 uppercase font-black tracking-[0.4em] mb-1",
-                        isProfessionalMode && "font-mono"
-                      )}>Carta Alvo</span>
-                      <span className={cn(
-                        "text-6xl font-black text-white italic transition-transform group-hover/box:rotate-3",
-                        isProfessionalMode ? "font-mono" : "font-display drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]"
-                      )}>{targetCard}</span>
-                      <div className={cn(
-                        "absolute bottom-0 left-0 right-0 h-1 transition-all",
-                        isProfessionalMode ? "bg-prof-emerald/20 group-hover:bg-prof-emerald/40" : "bg-white/5 group-hover:bg-white/20"
-                      )} />
+                 </div>
+                 
+                 <div className="w-full max-w-md grid grid-cols-2 gap-6 mt-4">
+                   <div className="p-10 rounded-[20px] flex flex-col items-center justify-center gap-2 border border-white/5 bg-gradient-to-br from-white/[0.05] to-transparent shadow-2xl relative overflow-hidden group/box hover:scale-[1.05] transition-all">
+                      <span className="text-[10px] text-white/30 uppercase font-black tracking-[0.4em] mb-1">Carta Alvo</span>
+                      <span className="text-6xl font-black text-white italic font-display drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]">{targetCard}</span>
                    </div>
-                 </Tooltip>
-                 <Tooltip content="O minuto exato da rodada em que o sinal foi validado pela rede neural">
-                   <div className={cn(
-                     "p-10 rounded-[20px] flex flex-col items-center justify-center gap-2 border transition-all shadow-2xl relative overflow-hidden group/box hover:scale-[1.05] cursor-help",
-                     isProfessionalMode 
-                      ? "bg-prof-black border-white/5 shadow-[inset_0_0_20px_rgba(255,255,255,0.05)]" 
-                      : "bg-gradient-to-br from-white/[0.05] to-transparent border-white/5 hover:border-white/10"
-                   )}>
-                      <div className="absolute top-2 right-4 opacity-5 group-hover/box:opacity-10 transition-opacity">
-                         <Clock size={40} />
-                      </div>
-                      <span className={cn(
-                        "text-[10px] text-white/30 uppercase font-black tracking-[0.4em] mb-1",
-                        isProfessionalMode && "font-mono"
-                      )}>Minuto</span>
-                      <span className={cn(
-                        "text-6xl font-black text-white italic transition-transform group-hover/box:-rotate-3 text-center",
-                        isProfessionalMode ? "font-mono" : "font-display drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]"
-                      )}>{String(lastSignalMinute).padStart(2, '0')}</span>
-                      <div className={cn(
-                        "absolute bottom-0 left-0 right-0 h-1 transition-all",
-                        isProfessionalMode ? "bg-prof-emerald/20 group-hover:bg-prof-emerald/40" : "bg-white/5 group-hover:bg-white/20"
-                      )} />
+                   <div className="p-10 rounded-[20px] flex flex-col items-center justify-center gap-2 border border-white/5 bg-gradient-to-br from-white/[0.05] to-transparent shadow-2xl relative overflow-hidden group/box hover:scale-[1.05] transition-all">
+                      <span className="text-[10px] text-white/30 uppercase font-black tracking-[0.4em] mb-1">Minuto</span>
+                      <span className="text-6xl font-black text-white italic font-display drop-shadow-[0_0_25px_rgba(255,255,255,0.4)] text-center">
+                        {String(lastSignalMinute).padStart(2, '0')}
+                      </span>
                    </div>
-                 </Tooltip>
-               </div>
-
-               <motion.div 
-                 initial={{ opacity: 0, y: 10 }}
-                 animate={{ opacity: 1, y: 0 }}
-                 className="mt-12 w-full flex flex-col items-center gap-10"
-               >
-                 <div className="px-10 py-3 bg-bet-tie/5 border-2 border-bet-tie/20 rounded-full shadow-[0_0_30px_rgba(255,215,0,0.1)] relative group/warn overflow-hidden hover:bg-bet-tie/10 transition-colors cursor-default">
-                    <div className="absolute inset-0 bg-bet-tie/[0.02] transform -skew-x-12" />
-                    <span className="text-[14px] font-black text-bet-tie uppercase tracking-[0.5em] italic relative z-10 drop-shadow-[0_0_8px_rgba(255,215,0,0.4)]">
-                      {strategy === 'AGGRESSIVE' ? 'PRÓXIMO ALVO: GALE 1 HABILITADO' : 'SINAL DE ALTA FIDELIDADE: SEM GALE'}
-                    </span>
                  </div>
 
-                 <div className="flex gap-20 md:gap-32 items-center">
-                    <Tooltip content="Percentual de confiança da rede neural na validade deste padrão específico">
-                      <div className="text-center group/stat relative cursor-help">
-                         <div className="absolute -inset-8 bg-bet-tie/5 rounded-full blur-2xl opacity-0 group-hover/stat:opacity-100 transition-opacity" />
-                         <div className="text-[11px] font-black text-white/20 uppercase tracking-[0.4em] mb-4 group-hover/stat:text-white/50 transition-colors">Confiança</div>
-                         <div className={cn(
-                           "text-6xl font-black italic transition-transform group-hover/stat:scale-110",
-                           isProfessionalMode ? "font-mono text-prof-emerald" : "font-display text-bet-tie drop-shadow-[0_0_20px_rgba(255,215,0,0.5)]"
-                         )}>{confidence}%</div>
+                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-12 w-full flex flex-col items-center gap-10">
+                   <div className="px-10 py-3 bg-bet-tie/5 border-2 border-bet-tie/20 rounded-full relative overflow-hidden">
+                      <span className="text-[14px] font-black text-bet-tie uppercase tracking-[0.5em] italic relative z-10 drop-shadow-[0_0_8px_rgba(255,215,0,0.4)]">
+                        {strategy === 'AGGRESSIVE' ? 'PRÓXIMO ALVO: GALE 1 HABILITADO' : 'SINAL DE ALTA FIDELIDADE: SEM GALE'}
+                      </span>
+                   </div>
+                   <div className="flex gap-20 md:gap-32 items-center">
+                      <div className="text-center">
+                         <div className="text-[11px] font-black text-white/20 uppercase tracking-[0.4em] mb-4">Confiança</div>
+                         <div className="text-6xl font-display font-black italic text-bet-tie drop-shadow-[0_0_20px_rgba(255,215,0,0.5)]">{confidence}%</div>
                       </div>
-                    </Tooltip>
-                    <div className="w-px h-20 bg-white/10" />
-                    <Tooltip content="Métrica histórica de acertos vs erros para este algoritmo específico nas últimas rodadas">
-                      <div className="text-center group/stat relative cursor-help">
-                         <div className="absolute -inset-8 bg-white/5 rounded-full blur-2xl opacity-0 group-hover/stat:opacity-100 transition-opacity" />
-                         <div className="text-[11px] font-black text-white/20 uppercase tracking-[0.4em] mb-4 group-hover/stat:text-white/50 transition-colors">Assertividade</div>
-                         <div className={cn(
-                            "text-6xl font-black text-white italic drop-shadow-[0_0_20px_rgba(255,255,255,0.4)] transition-transform group-hover/stat:scale-110",
-                            isProfessionalMode ? "font-mono" : "font-display"
-                          )}>{assertiveness}</div>
+                      <div className="w-px h-20 bg-white/10" />
+                      <div className="text-center">
+                         <div className="text-[11px] font-black text-white/20 uppercase tracking-[0.4em] mb-4">Assertividade</div>
+                         <div className="text-6xl font-display font-black text-white italic drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]">{assertiveness}</div>
                       </div>
-                    </Tooltip>
-                 </div>
-               </motion.div>
-            </motion.div>
-          )}
+                   </div>
+                 </motion.div>
+              </motion.div>
+            )}
 
-          {gameState === 'WAITING' && progress > 0 && (
-            <motion.div key="waiting" animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 2 }} className="flex flex-col items-center">
-               <div className="w-20 h-20 rounded-full border-4 border-bet-tie/20 border-t-bet-tie animate-spin mb-6 shadow-[0_0_30px_rgba(0,255,133,0.2)]" />
-               <h2 className="text-4xl font-black text-bet-tie uppercase italic tracking-tighter drop-shadow-[0_0_15px_rgba(0,255,133,0.4)]">Aguardando Green</h2>
-               <p className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-4">Sincronizando Resposta da API...</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            {gameState === 'WAITING' && (
+              <motion.div key="waiting" animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 2 }} className="flex flex-col items-center">
+                 <div className="w-20 h-20 rounded-full border-4 border-bet-tie/20 border-t-bet-tie animate-spin mb-6 shadow-[0_0_30px_rgba(0,255,133,0.2)]" />
+                 <h2 className="text-4xl font-black text-bet-tie uppercase italic tracking-tighter drop-shadow-[0_0_15px_rgba(0,255,133,0.4)]">Aguardando Green</h2>
+                 <p className="text-[10px] text-white/40 uppercase font-black tracking-widest mt-4">Sincronizando Resposta da API...</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
-    </div>
     </>
   );
 }
 
 function StrategyButton({ active, onClick, label, icon, theme, shake, isProfessionalMode, createRipple }: any) {
   const isGale = label === "ATÉ GALE 1";
-  const description = isGale ? "Agressivo" : "Conservador";
-  const tooltipContent = isGale 
-    ? "Estratégia agressiva: Permite cobrir perdas na rodada seguinte com uma aposta maior." 
-    : "Estratégia segura: Aposta fixa apenas na sinalização principal sem proteções extras.";
-
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     createRipple(e);
     onClick();
   };
-  
   return (
-    <Tooltip content={tooltipContent}>
-      <button onClick={handleClick} className={cn(
-        "flex-1 px-4 py-3 rounded-[20px] flex flex-col items-center justify-center gap-1 font-black transition-all relative overflow-hidden group hover:scale-[1.02] cursor-help", 
-        shake && "animate-shake",
-        isProfessionalMode 
-          ? (active 
-              ? "bg-prof-emerald shadow-[inset_0_0_20px_rgba(0,0,0,0.3)] text-prof-black" 
-              : "bg-prof-black border border-prof-emerald/20 text-prof-emerald/60 hover:text-prof-emerald shadow-[inset_0_0_15px_rgba(80,200,120,0.05)]")
-          : (active 
-              ? (isGale ? "bg-bet-red shadow-[0_0_30px_rgba(255,0,0,0.4)] hover:bg-[#CC0000]" : "bg-bet-blue shadow-[0_0_30px_rgba(0,136,255,0.4)] hover:bg-[#0066CC]")
-              : "bg-white/5 text-white/30 hover:bg-white/10 border border-white/5"),
-        active && theme?.btnClass
-      )}>
-        {active && <motion.div layoutId="strat-active" className="absolute inset-0 bg-white/10" />}
-        <div className={cn("relative z-10 flex items-center gap-2 text-[12px] uppercase tracking-widest", isProfessionalMode && "font-mono")}>
-          {icon} {label}
-        </div>
-        <span className={cn(
-          "relative z-10 text-[9px] uppercase tracking-[0.2em] font-bold opacity-60",
-          isProfessionalMode ? "font-mono" : "italic"
-        )}>
-          {description}
-        </span>
-      </button>
-    </Tooltip>
+    <button onClick={handleClick} className={cn(
+      "flex-1 px-4 py-3 rounded-[20px] flex flex-col items-center justify-center gap-1 font-black transition-all relative overflow-hidden group hover:scale-[1.02]", 
+      shake && "animate-shake",
+      isProfessionalMode 
+        ? (active ? "bg-prof-emerald shadow-[inset_0_0_20px_rgba(0,0,0,0.3)] text-prof-black" : "bg-prof-black border border-prof-emerald/20 text-prof-emerald/60 hover:text-prof-emerald")
+        : (active 
+            ? (isGale ? "bg-bet-red shadow-[0_0_30px_rgba(255,0,0,0.4)]" : "bg-bet-blue shadow-[0_0_30px_rgba(0,136,255,0.4)]")
+            : "bg-white/5 text-white/30 hover:bg-white/10 border border-white/5"),
+      active && theme?.btnClass
+    )}>
+      {active && <motion.div layoutId="strat-active" className="absolute inset-0 bg-white/10" />}
+      <div className="relative z-10 flex items-center gap-2 text-[12px] uppercase tracking-widest">
+        {icon} {label}
+      </div>
+      <span className="relative z-10 text-[9px] uppercase tracking-[0.2em] font-bold opacity-60 italic">
+        {isGale ? "Agressivo" : "Conservador"}
+      </span>
+    </button>
   );
 }
 
+function SignalLogs({ selectedGame, results = [] }: any) {
+  const historicalAlerts = React.useMemo(() => {
+    if (!results || results.length === 0) return [];
+    const sorted = [...results].sort((a: any, b: any) => b.timestamp - a.timestamp);
+    return sorted.slice(0, 20).map((res: any) => ({
+      id: res.id,
+      time: res.time,
+      type: res.color,
+      label: res.color === 'RED' ? 'CASA' : res.color === 'BLUE' ? 'FORA' : 'EMPATE',
+      val1: res.value || 8,
+      val2: res.color === 'TIE' ? (res.value || 10) : 8,
+      timestamp: res.timestamp
+    }));
+  }, [results]);
+
+  if (historicalAlerts.length === 0) return (
+    <div className="w-full glass-panel rounded-[20px] p-6 animate-pulse bg-white/5 flex items-center justify-center">
+      <span className="text-[10px] font-bold text-white/20 uppercase tracking-widest">Aguardando Dados da Partida...</span>
+    </div>
+  );
+
+  return (
+    <div className="w-full glass-panel rounded-[20px] p-6 relative overflow-hidden bg-black/60 shadow-[0_0_40px_rgba(0,0,0,0.3)] border-white/5">
+      <div className="flex flex-col gap-4 relative z-10">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] italic">HISTÓRICO DE PARTIDAS EM TEMPO REAL</h3>
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-[8px] font-bold text-green-500/60 uppercase">Live Feed</span>
+          </div>
+        </div>
+        <div className="flex gap-3 overflow-x-auto pb-4 no-scrollbar scroll-smooth">
+          {historicalAlerts.map((alert: any) => (
+            <div key={alert.id} className={cn(
+              "w-20 py-2 rounded-lg flex flex-col items-center justify-center gap-1 border transition-all hover:scale-105 shrink-0",
+              alert.type === 'RED' ? "bg-red-950/20 border-red-500/20" :
+              alert.type === 'BLUE' ? "bg-blue-950/20 border-blue-500/20" :
+              "bg-yellow-950/20 border-yellow-500/20"
+            )}>
+              <span className="text-[7px] font-bold text-white/40 uppercase tracking-tighter">{alert.time}</span>
+              <span className="text-[10px] font-black text-white">{alert.val1}x{alert.val2}</span>
+              <span className={cn("text-[6px] font-black uppercase", alert.type === 'RED' ? "text-red-500" : alert.type === 'BLUE' ? "text-blue-500" : "text-yellow-500")}>
+                {alert.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StrategyBoard({ selectedGame, isProfessionalMode }: any) {
   const [probableTimes, setProbableTimes] = React.useState<any[]>([]);
@@ -1129,30 +1007,24 @@ function StrategyBoard({ selectedGame, isProfessionalMode }: any) {
     const generateTimes = () => {
       const times = [];
       const now = new Date();
-      const labels = selectedGame === 'FOOTBALL_STUDIO' 
-        ? ['EMPATE', 'HOME', 'EMPATE', 'AWAY', 'EMPATE'] 
-        : ['EMPATE', 'RED', 'EMPATE', 'BLUE', 'EMPATE'];
+      const labels = ['EMPATE', 'RED', 'EMPATE', 'BLUE', 'EMPATE'];
       const colors = ['GOLD', 'RED', 'GOLD', 'BLUE', 'GOLD'];
-      
       for (let i = 0; i < 5; i++) {
         const offset = (i * 5 + Math.floor(Math.random() * 5) + 3);
         const future = new Date(now.getTime() + offset * 60000);
         const hours = future.getHours().toString().padStart(2, '0');
         const minutes = future.getMinutes().toString().padStart(2, '0');
-        const confidenceValue = Math.floor(Math.random() * 12) + 85;
-        
         times.push({
           time: `${hours}:${minutes}`,
           label: labels[i % labels.length],
           color: colors[i % colors.length],
-          confidence: `${confidenceValue}%`
+          confidence: `${Math.floor(Math.random() * 12) + 85}%`
         });
       }
       setProbableTimes(times);
     };
-
     generateTimes();
-    const interval = setInterval(generateTimes, 300000); // 5 minutes refresh
+    const interval = setInterval(generateTimes, 300000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1160,82 +1032,88 @@ function StrategyBoard({ selectedGame, isProfessionalMode }: any) {
     <div className="w-full flex flex-col gap-4">
       <div className="flex items-center justify-between px-2">
         <h3 className="text-[14px] font-black text-white/40 uppercase tracking-[0.3em] italic">PRÓXIMOS HORÁRIOS</h3>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-bet-tie/10 border border-bet-tie/30 shadow-[0_0_15px_rgba(255,215,0,0.1)]">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-bet-tie/10 border border-bet-tie/30">
            <Timer size={14} className="text-bet-tie" />
            <span className="text-[10px] font-black text-bet-tie uppercase">PREVISÃO</span>
         </div>
       </div>
-
-      <div className={cn(
-        "w-full glass-panel rounded-[32px] p-6 md:p-8 border border-white/5 relative overflow-hidden",
-        isProfessionalMode ? "bg-prof-graphite shadow-[inset_0_0_40px_rgba(0,0,0,0.6)]" : "bg-black/40 shadow-2xl"
-      )}>
-        <div className="absolute top-0 right-0 p-8 opacity-5 rotate-12">
-          <Timer size={120} className="text-white" />
-        </div>
-
-              <div className="flex flex-col gap-2 relative z-10">
-                {probableTimes.map((pt, i) => (
-                  <Tooltip key={`prob-time-tooltip-${i}`} content={`Probabilidade de ${pt.label} detectada para às ${pt.time}`}>
-                    <motion.div 
-                      key={`prob-time-row-${i}`}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.1 }}
-                      whileHover={{ scale: 1.01, backgroundColor: "rgba(255,255,255,0.03)" }}
-                      className="flex items-center justify-between p-4 md:p-5 rounded-[24px] bg-white/[0.02] border border-white/5 transition-all group cursor-help"
-                    >
-                      <div className="flex items-center gap-4 md:gap-8">
-                        <span className="text-xl md:text-2xl font-mono font-black text-white/90 group-hover:text-white">
-                          {pt.time}
-                        </span>
-                        
-                        <div className={cn(
-                          "px-3 md:px-5 py-1.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-[0.1em] shadow-lg",
-                          pt.color === 'BLUE' ? "bg-bet-blue/20 text-bet-blue border border-bet-blue/40 shadow-[0_0_20px_rgba(0,136,255,0.2)]" :
-                          pt.color === 'RED' ? "bg-bet-red/20 text-bet-red border border-bet-red/40 shadow-[0_0_20px_rgba(255,0,0,0.2)]" :
-                          "bg-bet-tie/20 text-bet-tie border border-bet-tie/40 shadow-[0_0_20px_rgba(255,215,0,0.2)]"
-                        )}>
-                          {pt.label}
-                        </div>
-                      </div>
-        
-                      <div className="flex items-center gap-4 md:gap-8">
-                        <div className="w-16 md:w-24 h-2 bg-white/5 rounded-full overflow-hidden">
-                          <motion.div 
-                            initial={{ width: 0 }}
-                            animate={{ width: pt.confidence }}
-                            transition={{ duration: 2, delay: i * 0.15 }}
-                            className={cn(
-                              "h-full rounded-full shadow-[0_0_10px_currentColor]",
-                              pt.color === 'BLUE' ? "bg-bet-blue text-bet-blue" :
-                              pt.color === 'RED' ? "bg-bet-red text-bet-red" :
-                              "bg-bet-tie text-bet-tie"
-                            )}
-                          />
-                        </div>
-                        
-                        <div className="flex flex-col items-end min-w-[40px]">
-                           <span className={cn(
-                             "text-lg md:text-xl font-display font-black italic",
-                             pt.color === 'BLUE' ? "text-bet-blue/70" :
-                             pt.color === 'RED' ? "text-bet-red/70" :
-                             "text-bet-tie/70"
-                           )}>
-                             {pt.confidence}
-                           </span>
-                        </div>
-                      </div>
-                    </motion.div>
-                  </Tooltip>
-                ))}
+      <div className={cn("w-full glass-panel rounded-[32px] p-6 md:p-8 border border-white/5 relative overflow-hidden", isProfessionalMode ? "bg-prof-graphite" : "bg-black/40 shadow-2xl")}>
+        <div className="flex flex-col gap-2 relative z-10">
+          {probableTimes.map((pt, i) => (
+            <motion.div 
+              key={`prob-time-row-${i}`}
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: i * 0.1 }}
+              className="flex items-center justify-between p-4 md:p-5 rounded-[24px] bg-white/[0.02] border border-white/5 transition-all hover:bg-white/[0.03]"
+            >
+              <div className="flex items-center gap-4 md:gap-8">
+                <span className="text-xl md:text-2xl font-mono font-black text-white/90">{pt.time}</span>
+                <div className={cn(
+                  "px-3 md:px-5 py-1.5 rounded-xl text-[9px] md:text-[10px] font-black uppercase tracking-[0.1em]",
+                  pt.color === 'BLUE' ? "bg-bet-blue/20 text-bet-blue border border-bet-blue/40" :
+                  pt.color === 'RED' ? "bg-bet-red/20 text-bet-red border border-bet-red/40" :
+                  "bg-bet-tie/20 text-bet-tie border border-bet-tie/40"
+                )}>
+                  {pt.label}
+                </div>
               </div>
+              <div className="flex items-center gap-4 md:gap-8">
+                <div className="w-16 md:w-24 h-2 bg-white/5 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: pt.confidence }}
+                    transition={{ duration: 2, delay: i * 0.15 }}
+                    className={cn("h-full rounded-full", pt.color === 'BLUE' ? "bg-bet-blue" : pt.color === 'RED' ? "bg-bet-red" : "bg-bet-tie")}
+                  />
+                </div>
+                <span className={cn("text-lg md:text-xl font-display font-black italic", pt.color === 'BLUE' ? "text-bet-blue/70" : pt.color === 'RED' ? "text-bet-red/70" : "text-bet-tie/70")}>
+                  {pt.confidence}
+                </span>
+              </div>
+            </motion.div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
-function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authError, handleAuth }: any) {
+// FIX #6: LightningStrike com cleanup correto usando ref para timeouts recursivos
+function LightningStrike() {
+  const [visible, setVisible] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const trigger = () => {
+      if (Math.random() > 0.7) {
+        setVisible(true);
+        setTimeout(() => setVisible(false), 50 + Math.random() * 100);
+      }
+      timeoutRef.current = setTimeout(trigger, 2000 + Math.random() * 5000);
+    };
+    timeoutRef.current = setTimeout(trigger, 3000);
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  if (!visible) return null;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: [0, 0.8, 0.3, 1, 0] }}
+      transition={{ duration: 0.2 }}
+      className="absolute inset-0 z-0 bg-bet-blue/10 pointer-events-none"
+    >
+      <div className="absolute top-0 left-1/4 w-1 h-full bg-bet-blue shadow-[0_0_50px_#0088FF] blur-sm transform -skew-x-12" />
+      <div className="absolute top-0 right-1/3 w-1 h-full bg-bet-blue shadow-[0_0_50px_#0088FF] blur-sm transform skew-x-12" />
+    </motion.div>
+  );
+}
+
+function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authError, authLoading, handleAuth }: any) {
   return (
     <motion.div 
       initial={{ opacity: 0 }}
@@ -1243,7 +1121,6 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
       exit={{ opacity: 0 }}
       className="min-h-screen flex items-center justify-center p-4 relative bg-black overflow-hidden"
     >
-      {/* Dynamic Hacker Background */}
       <div className="absolute inset-0 z-[1]">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,136,255,0.1)_0%,transparent_70%)]" />
         <div className="absolute inset-0 opacity-20">
@@ -1251,22 +1128,13 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
             <BackgroundParticles intensity={1} />
           </Canvas>
         </div>
-        
-        {/* Lightning Strikes */}
         <LightningStrike />
-        
-        {/* Matrix Rain Column Simulation */}
         <div className="absolute inset-0 flex justify-around opacity-10 pointer-events-none">
           {Array.from({ length: 20 }).map((_, i) => (
             <motion.div
               key={`matrix-${i}`}
               animate={{ y: ["-100%", "100%"] }}
-              transition={{ 
-                duration: 2 + Math.random() * 3, 
-                repeat: Infinity, 
-                ease: "linear",
-                delay: Math.random() * 2
-              }}
+              transition={{ duration: 2 + (i % 3), repeat: Infinity, ease: "linear", delay: i % 2 }}
               className="w-px h-64 bg-gradient-to-b from-transparent via-bet-blue to-transparent"
             />
           ))}
@@ -1280,7 +1148,6 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
           transition={{ type: "spring", damping: 15 }}
           className="glass-panel rounded-[40px] p-10 relative flex flex-col items-center border-t border-white/20 shadow-[0_0_100px_rgba(0,136,255,0.2)]"
         >
-          {/* Scanning Line */}
           <motion.div 
             animate={{ top: ["0%", "100%", "0%"] }}
             transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
@@ -1289,15 +1156,10 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
 
           <motion.div 
             whileHover={{ scale: 1.1 }}
-            className="w-24 h-24 bg-bet-blue rounded-[30px] flex items-center justify-center mb-8 shadow-[0_0_40px_rgba(0,136,255,0.5)] border-2 border-white/20 group relative overflow-hidden"
+            className="w-24 h-24 bg-bet-blue rounded-[30px] flex items-center justify-center mb-8 shadow-[0_0_40px_rgba(0,136,255,0.5)] border-2 border-white/20 relative overflow-hidden"
           >
             <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-            <Target className="text-white relative z-10 group-hover:scale-110 transition-transform" size={48} />
-            <motion.div 
-              animate={{ opacity: [0, 1, 0] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className="absolute inset-0 bg-white/20"
-            />
+            <Target className="text-white relative z-10" size={48} />
           </motion.div>
 
           <div className="text-center mb-10">
@@ -1318,9 +1180,9 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
                 value={password} 
                 onChange={e => setPassword(e.target.value)} 
                 placeholder="TOKEN DE ACESSO" 
-                className="w-full bg-black/60 border-2 border-white/10 p-6 rounded-2xl text-center font-display font-black tracking-[0.3em] outline-none focus:border-bet-blue focus:shadow-[0_0_30px_rgba(0,136,255,0.2)] transition-all placeholder:text-white/10" 
+                disabled={authLoading}
+                className="w-full bg-black/60 border-2 border-white/10 p-6 rounded-2xl text-center font-display font-black tracking-[0.3em] outline-none focus:border-bet-blue focus:shadow-[0_0_30px_rgba(0,136,255,0.2)] transition-all placeholder:text-white/10 disabled:opacity-50" 
               />
-              <div className="absolute inset-0 rounded-2xl border border-bet-blue/0 group-focus-within:border-bet-blue/50 pointer-events-none transition-all" />
             </div>
 
             {authError && (
@@ -1335,30 +1197,18 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
             )}
 
             <motion.button 
-              whileHover={{ scale: 1.02, boxShadow: "0 0 40px rgba(0,136,255,0.6)" }}
-              whileTap={{ scale: 0.98 }}
-              onClick={(e: any) => {
-                const button = e.currentTarget;
-                const circle = document.createElement("span");
-                const diameter = Math.max(button.clientWidth, button.clientHeight);
-                const radius = diameter / 2;
-                const rect = button.getBoundingClientRect();
-
-                circle.style.width = circle.style.height = `${diameter}px`;
-                circle.style.left = `${e.clientX - rect.left - radius}px`;
-                circle.style.top = `${e.clientY - rect.top - radius}px`;
-                circle.classList.add("ripple");
-
-                const ripple = button.getElementsByClassName("ripple")[0];
-                if (ripple) ripple.remove();
-
-                button.appendChild(circle);
-              }}
-              className="w-full bg-bet-blue py-6 rounded-2xl font-display font-black uppercase italic tracking-[0.2em] text-xl text-white shadow-2xl relative overflow-hidden group/btn"
+              whileHover={{ scale: authLoading ? 1 : 1.02 }}
+              whileTap={{ scale: authLoading ? 1 : 0.98 }}
+              disabled={authLoading}
+              className="w-full bg-bet-blue py-6 rounded-2xl font-display font-black uppercase italic tracking-[0.2em] text-xl text-white shadow-2xl relative overflow-hidden group/btn disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover/btn:translate-x-full transition-transform duration-700" />
               <span className="relative z-10 flex items-center justify-center gap-3">
-                ENTRAR NO TERMINAL <Cpu size={24} />
+                {authLoading ? (
+                  <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> VERIFICANDO...</>
+                ) : (
+                  <>ENTRAR NO TERMINAL <Cpu size={24} /></>
+                )}
               </span>
             </motion.button>
           </form>
@@ -1367,8 +1217,8 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
             href="https://t.me/SpeeddadosfreeE" 
             target="_blank" 
             rel="noreferrer" 
-            whileHover={{ x: 5, color: "#00D1FF" }}
-            className="mt-10 text-[11px] font-black text-white/30 uppercase tracking-widest flex items-center gap-2 transition-colors"
+            whileHover={{ x: 5 }}
+            className="mt-10 text-[11px] font-black text-white/30 uppercase tracking-widest flex items-center gap-2 transition-colors hover:text-bet-blue"
           >
             Obter Acesso Vitalício <LogOut size={12} className="rotate-180" />
           </motion.a>
@@ -1380,30 +1230,9 @@ function AuthScreen({ isLoginView, setIsLoginView, password, setPassword, authEr
 
 function GameSelection({ onSelect }: { onSelect: (game: GameType) => void }) {
   const games = [
-    { 
-      id: 'BACCARAT' as GameType, 
-      name: 'SPEED BACCARAT BRASILEIRO', 
-      icon: <Spade className="text-white" size={48} />,
-      desc: 'Neural Predictor v4.0',
-      color: 'bg-gradient-to-br from-bet-blue to-blue-900',
-      glow: 'shadow-[0_0_40px_rgba(0,136,255,0.3)]'
-    },
-    { 
-      id: 'BACBO' as GameType, 
-      name: 'BAC BO', 
-      icon: <Cpu className="text-white" size={48} />,
-      desc: 'Neural Predictor v4.0',
-      color: 'bg-gradient-to-br from-bet-red to-red-900',
-      glow: 'shadow-[0_0_40px_rgba(255,0,0,0.3)]'
-    },
-    { 
-      id: 'FOOTBALL_STUDIO' as GameType, 
-      name: 'FOOTBALL STUDIO', 
-      icon: <Trophy className="text-white" size={48} />,
-      desc: 'Neural Predictor v4.0',
-      color: 'bg-gradient-to-br from-bet-tie to-amber-900',
-      glow: 'shadow-[0_0_40px_rgba(255,215,0,0.3)]'
-    }
+    { id: 'BACCARAT' as GameType, name: 'SPEED BACCARAT BRASILEIRO', icon: <Spade className="text-white" size={48} />, desc: 'Neural Predictor v4.0', color: 'bg-gradient-to-br from-bet-blue to-blue-900', glow: 'shadow-[0_0_40px_rgba(0,136,255,0.3)]' },
+    { id: 'BACBO' as GameType, name: 'BAC BO', icon: <Cpu className="text-white" size={48} />, desc: 'Neural Predictor v4.0', color: 'bg-gradient-to-br from-bet-red to-red-900', glow: 'shadow-[0_0_40px_rgba(255,0,0,0.3)]' },
+    { id: 'FOOTBALL_STUDIO' as GameType, name: 'FOOTBALL STUDIO', icon: <Trophy className="text-white" size={48} />, desc: 'Neural Predictor v4.0', color: 'bg-gradient-to-br from-bet-tie to-amber-900', glow: 'shadow-[0_0_40px_rgba(255,215,0,0.3)]' }
   ];
 
   return (
@@ -1415,142 +1244,42 @@ function GameSelection({ onSelect }: { onSelect: (game: GameType) => void }) {
       className="min-h-screen flex flex-col items-center justify-center p-4 relative bg-black overflow-hidden"
     >
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(0,136,255,0.1)_0%,transparent_50%)]" />
-      
       <div className="w-full max-w-6xl relative z-10">
         <div className="text-center mb-16">
-          <motion.h1 
-            initial={{ y: -20 }}
-            animate={{ y: 0 }}
-            className="text-4xl md:text-6xl font-display font-black italic tracking-tighter mb-4"
-          >
+          <motion.h1 initial={{ y: -20 }} animate={{ y: 0 }} className="text-4xl md:text-6xl font-display font-black italic tracking-tighter mb-4">
             SELECIONE O <span className="text-bet-blue">TERMINAL</span>
           </motion.h1>
           <div className="h-1 w-32 bg-bet-blue mx-auto rounded-full" />
         </div>
-
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 px-4">
           {games.map((game, i) => (
             <motion.div
               key={game.id}
-              initial={{ opacity: 0, y: 50, rotateX: 20 }}
-              animate={{ opacity: 1, y: 0, rotateX: 0 }}
-              transition={{ 
-                delay: i * 0.15,
-                duration: 0.8,
-                ease: "easeOut"
-              }}
-              whileHover={{ 
-                scale: 1.05,
-                y: -15,
-                rotateY: 2,
-                transition: { type: "spring", stiffness: 300, damping: 15 }
-              }}
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.15, duration: 0.8, ease: "easeOut" }}
+              whileHover={{ scale: 1.05, y: -15 }}
               onClick={() => onSelect(game.id)}
-              className={cn(
-                "glass-panel rounded-[20px] p-10 flex flex-col items-center text-center cursor-pointer border border-white/5 hover:border-white/20 transition-all group relative overflow-hidden shadow-2xl animate-float",
-                game.glow,
-                game.id === 'BACCARAT' && "hover:shadow-[inset_0_0_30px_rgba(0,136,255,0.2)]",
-                game.id === 'BACBO' && "hover:shadow-[inset_0_0_30px_rgba(255,0,0,0.2)]",
-                game.id === 'FOOTBALL_STUDIO' && "hover:shadow-[inset_0_0_30px_rgba(255,215,0,0.2)]"
-              )}
-              style={{ animationDelay: `${i * 0.5}s` }}
+              className={cn("glass-panel rounded-[20px] p-10 flex flex-col items-center text-center cursor-pointer border border-white/5 hover:border-white/20 transition-all group relative overflow-hidden shadow-2xl", game.glow)}
             >
-              <div className={cn("absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity duration-500 bg-white")} />
-              <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/[0.02] to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-              
-              <div className={cn(
-                "w-24 h-24 rounded-2xl flex items-center justify-center mb-10 relative z-10 transition-transform group-hover:scale-110",
-                game.color,
-                game.id === 'BACCARAT' && "shadow-[0_10px_30px_rgba(0,136,255,0.5)]",
-                game.id === 'BACBO' && "shadow-[0_10px_30px_rgba(255,0,0,0.5)]",
-                game.id === 'FOOTBALL_STUDIO' && "shadow-[0_10px_30px_rgba(255,215,0,0.5)]"
-              )}>
+              <div className={cn("w-24 h-24 rounded-2xl flex items-center justify-center mb-10 relative z-10 transition-transform group-hover:scale-110", game.color)}>
                 {game.icon}
-                <div className="absolute inset-0 rounded-3xl animate-pulse bg-white/10" />
-                <motion.div 
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                  className="absolute -inset-2 border border-white/5 rounded-full"
-                />
               </div>
-
-              <h2 className="text-3xl font-display font-black italic tracking-tighter text-white mb-2 relative z-10">
-                {game.name}
-              </h2>
-              <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em] mb-8 relative z-10 italic">
-                {game.desc}
-              </p>
-
+              <h2 className="text-3xl font-display font-black italic tracking-tighter text-white mb-2 relative z-10">{game.name}</h2>
+              <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em] mb-8 relative z-10 italic">{game.desc}</p>
               <div className="w-full h-px bg-white/5 mb-8 relative z-10" />
-
-              <motion.div 
-                whileHover={{ scale: 1.05 }}
-                onClick={(e: any) => {
-                  const button = e.currentTarget;
-                  const circle = document.createElement("span");
-                  const diameter = Math.max(button.clientWidth, button.clientHeight);
-                  const radius = diameter / 2;
-                  const rect = button.getBoundingClientRect();
-
-                  circle.style.width = circle.style.height = `${diameter}px`;
-                  circle.style.left = `${e.clientX - rect.left - radius}px`;
-                  circle.style.top = `${e.clientY - rect.top - radius}px`;
-                  circle.classList.add("ripple");
-
-                  const ripple = button.getElementsByClassName("ripple")[0];
-                  if (ripple) ripple.remove();
-
-                  button.appendChild(circle);
-                  onSelect(game.id);
-                }}
-                className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 group-hover:bg-bet-blue group-hover:text-white transition-all text-[11px] font-black uppercase tracking-widest relative z-10 shine-effect cursor-pointer overflow-hidden"
-              >
+              <div className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 group-hover:bg-bet-blue transition-all text-[11px] font-black uppercase tracking-widest relative z-10">
                 Ativar Terminal
-              </motion.div>
+              </div>
             </motion.div>
           ))}
         </div>
-        
         <div className="mt-16 text-center">
-           <motion.div 
-             animate={{ opacity: [0.3, 0.6, 0.3] }}
-             transition={{ duration: 2, repeat: Infinity }}
-             className="flex items-center justify-center gap-2 text-[10px] font-black text-white/30 uppercase tracking-[0.5em]"
-           >
+           <motion.div animate={{ opacity: [0.3, 0.6, 0.3] }} transition={{ duration: 2, repeat: Infinity }} className="flex items-center justify-center gap-2 text-[10px] font-black text-white/30 uppercase tracking-[0.5em]">
              <Activity size={12} /> Sincronizando com Evolution Gaming Live
            </motion.div>
         </div>
       </div>
-    </motion.div>
-  );
-}
-
-function LightningStrike() {
-  const [visible, setVisible] = useState(false);
-  
-  useEffect(() => {
-    const trigger = () => {
-      if (Math.random() > 0.7) {
-        setVisible(true);
-        setTimeout(() => setVisible(false), 50 + Math.random() * 100);
-      }
-      setTimeout(trigger, 2000 + Math.random() * 5000);
-    };
-    const timeout = setTimeout(trigger, 3000);
-    return () => clearTimeout(timeout);
-  }, []);
-
-  if (!visible) return null;
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: [0, 0.8, 0.3, 1, 0] }}
-      transition={{ duration: 0.2 }}
-      className="absolute inset-0 z-0 bg-bet-blue/10 pointer-events-none"
-    >
-      <div className="absolute top-0 left-1/4 w-1 h-full bg-bet-blue shadow-[0_0_50px_#0088FF] blur-sm transform -skew-x-12" />
-      <div className="absolute top-0 right-1/3 w-1 h-full bg-bet-blue shadow-[0_0_50px_#0088FF] blur-sm transform skew-x-12" />
     </motion.div>
   );
 }
