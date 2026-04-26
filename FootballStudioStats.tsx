@@ -11,7 +11,9 @@ interface StatsProps {
 }
 
 export function FootballStudioStats({ results, gameState }: StatsProps) {
-  const tieResults = useMemo(() => results.filter(r => r.color === 'TIE'), [results]);
+  const tieResults = useMemo(() => {
+    return [...results].filter(r => r.color === 'TIE').sort((a, b) => b.timestamp - a.timestamp);
+  }, [results]);
   
   // Logic based on the images provided:
   // Tie gaps can be estimated from the history.
@@ -102,7 +104,7 @@ export function FootballStudioStats({ results, gameState }: StatsProps) {
 
         <div className="absolute bottom-4 left-4 right-4 flex grow gap-1 justify-between px-2">
            {tieResults.slice(0, 6).map((tie, i) => (
-             <div key={`tie-dot-${tie.id || i}`} className="flex flex-col items-center gap-1 group">
+             <div key={`tie-dot-${tie.id}-${i}`} className="flex flex-col items-center gap-1 group">
                 <div className="w-2.5 h-2.5 rounded-full bg-bet-tie shadow-[0_0_8px_#FFD700] group-hover:scale-125 transition-transform" />
                 <span className="text-[7px] font-mono text-white/20 font-bold">{tie.time.split(':').slice(1).join(':')}</span>
              </div>
@@ -129,12 +131,13 @@ export function FootballStudioStats({ results, gameState }: StatsProps) {
 
         {/* Results Grid */}
         <div className="flex-1 overflow-hidden flex gap-6">
-          <div className="flex-1 grid grid-cols-18 gap-1 content-start">
+          <div className="flex-1 grid grid-cols-[repeat(18,minmax(0,1fr))] gap-1 content-start overflow-y-auto pr-1">
             {Array.from({ length: 90 }).map((_, i) => {
               const res = results[i] || { color: 'EMPTY', id: `empty-${i}` };
+              const uniqueKey = res.id && res.id.startsWith('empty') ? `grid-item-${res.id}` : `grid-item-${res.id || i}-${i}`;
               return (
                 <div 
-                  key={`grid-item-${res.id || i}-${i}`} 
+                  key={uniqueKey} 
                   className={cn(
                     "aspect-square rounded-[6px] flex items-center justify-center text-[8px] font-black text-white border border-white/20 transition-transform hover:scale-110",
                     res.color === 'BLUE' ? "bg-gradient-to-br from-[#0088FF] to-[#002244] shadow-[0_0_20px_rgba(0,136,255,0.6)] saturate-150" : 
