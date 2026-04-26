@@ -10,7 +10,7 @@ export function LiveFeed({ results }: { results: GameResult[] }) {
       <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-12 custom-scrollbar no-scrollbar scroll-smooth">
         {results.slice(0, 40).map((res, i) => (
           <motion.div
-            key={res.id || `live-res-${i}`}
+            key={res.id ? `live-res-${res.id}-${i}` : `live-res-idx-${i}`}
             initial={{ opacity: 0, scale: 0.5 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.03, type: "spring", stiffness: 200 }}
