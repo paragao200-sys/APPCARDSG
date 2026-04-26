@@ -21,6 +21,9 @@ export function useFirebaseSync() {
     if (isInitialized.current) return;
     isInitialized.current = true;
 
+    let unsubscribe: (() => void) | undefined;
+    let interval: NodeJS.Timeout | undefined;
+
     const setup = async () => {
       try {
         if (!auth.currentUser) {
@@ -38,7 +41,7 @@ export function useFirebaseSync() {
         const resultsRef = collection(db, 'live_results');
         const q = query(resultsRef, orderBy('timestamp', 'desc'), limit(50));
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        unsubscribe = onSnapshot(q, async (snapshot) => {
           const results = snapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data()
@@ -54,24 +57,23 @@ export function useFirebaseSync() {
             ];
             const patternValues = [5, 13, 7, 10, 10, 8, 8, 9, 7, 6, 12, 13, 7, 10, 8, 13, 7, 12, 6, 10];
             
-            const initialData = patternColors.map((color, i) => {
-              const timestamp = Date.now() - (i * 30000); // 30s intervals
-              return {
+            // Seed sequentially to avoid flooding
+            for (let i = 0; i < patternColors.length; i++) {
+              const color = patternColors[i];
+              const timestamp = Date.now() - ((patternColors.length - i) * 60000);
+              const item = {
                 color: color,
                 value: patternValues[i] || 8,
                 time: new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
                 timestamp
               };
-            });
-            
-            initialData.forEach(async (item) => {
-               await addDoc(resultsRef, item);
-            });
+              await addDoc(resultsRef, item);
+            }
           }
         });
 
         // Universal Maintenance - Less random, more pattern-based
-        const interval = setInterval(async () => {
+        interval = setInterval(async () => {
           const snapshot = await getDocs(q);
           const docs = snapshot.docs;
           const lastDoc = docs[0];
@@ -100,16 +102,17 @@ export function useFirebaseSync() {
           }
         }, 4000);
 
-        return () => {
-          unsubscribe();
-          clearInterval(interval);
-        };
       } catch (err) {
         console.error("Firebase sync setup failed:", err);
       }
     };
 
     setup();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   return { recentResults };
